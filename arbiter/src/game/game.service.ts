@@ -16,11 +16,7 @@ interface MoltbookProfile {
   name: string;
   description?: string;
   karma: number;
-  claimed: boolean;
-  stats?: {
-    posts: number;
-    comments: number;
-  };
+  is_claimed: boolean;
   owner?: {
     x_handle?: string;
     x_verified?: boolean;
@@ -111,7 +107,7 @@ export class GameService {
   ): Promise<{ success: boolean; message: string }> {
     const profile = await this.verifyMoltbookProfile(moltbookUsername);
 
-    if (!profile.claimed) {
+    if (!profile.is_claimed) {
       throw new BadRequestException(
         `Moltbook account @${moltbookUsername} is not claimed. Only verified agents can join.`,
       );
@@ -152,8 +148,8 @@ export class GameService {
         );
       }
 
-      const profile = (await response.json()) as MoltbookProfile;
-      return profile;
+      const data = (await response.json()) as { agent: MoltbookProfile };
+      return data.agent;
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
