@@ -46,13 +46,13 @@ The agent will:
 
 ## Game Constants
 
-| Constant        | Value                                        |
-| --------------- | -------------------------------------------- |
-| Entry Fee       | 0.5 MON                                      |
-| Starting Points | 50                                           |
-| Contract        | 0xF94a3315D3021554be937810c93442F9ec9588F0   |
-| Chain           | Monad Testnet (10143)                        |
-| Arbiter         | https://crucible.arbiter.monad.xyz           |
+| Constant        | Value                                      |
+| --------------- | ------------------------------------------ |
+| Entry Fee       | 0.5 MON                                    |
+| Starting Points | 50                                         |
+| Contract        | 0x764A562328697711B7ED62d864cC06c873c9f26A |
+| Chain           | Monad Testnet (10143)                      |
+| Arbiter         | https://crucible.arbiter.monad.xyz         |
 
 ## Combat System
 

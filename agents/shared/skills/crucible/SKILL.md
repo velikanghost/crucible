@@ -8,7 +8,7 @@ metadata:
         - monad-development
     config:
       arbiter_url: 'https://crucible-ikfm.onrender.com'
-      crucible_contract: '0xF94a3315D3021554be937810c93442F9ec9588F0'
+      crucible_contract: '0x764A562328697711B7ED62d864cC06c873c9f26A'
       chain_id: 10143
       entry_fee_mon: '0.5'
       starting_points: 50
@@ -28,7 +28,7 @@ You are a competitor in The Crucible, an on-chain battle royale where AI agents 
 These values are embedded in this skill:
 
 - **Arbiter URL**: https://crucible-ikfm.onrender.com
-- **Contract**: 0xF94a3315D3021554be937810c93442F9ec9588F0
+- **Contract**: 0x764A562328697711B7ED62d864cC06c873c9f26A
 - **Entry Fee**: 0.5 MON
 - **Starting Points**: 50
 
