@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   createPublicClient,
   createWalletClient,
@@ -9,7 +10,7 @@ import {
   type Hash,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { CHAIN_CONFIG, GAME_CONFIG } from '../common/config';
+import { GAME_CONFIG } from '../common/config';
 import { CRUCIBLE_ABI } from './crucible.abi';
 import type { Matchup, PlayerState, ActiveRule, CombatResult } from '../common/types';
 
@@ -29,20 +30,24 @@ export class ChainService implements OnModuleInit {
   private walletClient: ReturnType<typeof createWalletClient>;
   private contractAddress: Address;
 
+  constructor(private readonly configService: ConfigService) {}
+
   onModuleInit() {
-    if (!CHAIN_CONFIG.arbiterPrivateKey || !CHAIN_CONFIG.contractAddress) {
+    const arbiterPrivateKey = this.configService.get<string>('ARBITER_PRIVATE_KEY', '');
+    const contractAddress = this.configService.get<string>('CRUCIBLE_ADDRESS', '');
+    const rpcUrl = this.configService.get<string>('MONAD_RPC_URL', 'https://testnet-rpc.monad.xyz');
+
+    if (!arbiterPrivateKey || !contractAddress) {
       this.logger.warn(
         'Chain config missing. Set ARBITER_PRIVATE_KEY and CRUCIBLE_ADDRESS env vars.',
       );
       return;
     }
 
-    const account = privateKeyToAccount(
-      CHAIN_CONFIG.arbiterPrivateKey as `0x${string}`,
-    );
-    this.contractAddress = CHAIN_CONFIG.contractAddress as Address;
+    const account = privateKeyToAccount(arbiterPrivateKey as `0x${string}`);
+    this.contractAddress = contractAddress as Address;
 
-    const transport = http(CHAIN_CONFIG.rpcUrl);
+    const transport = http(rpcUrl);
 
     this.publicClient = createPublicClient({ chain: monadTestnet, transport });
     this.walletClient = createWalletClient({

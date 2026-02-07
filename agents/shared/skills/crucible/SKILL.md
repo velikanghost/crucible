@@ -7,7 +7,7 @@ metadata:
       skills:
         - monad-development
     config:
-      arbiter_url: 'https://crucible.arbiter.monad.xyz'
+      arbiter_url: 'https://crucible-ikfm.onrender.com'
       crucible_contract: '0xF94a3315D3021554be937810c93442F9ec9588F0'
       chain_id: 10143
       entry_fee_mon: '0.5'
@@ -27,7 +27,7 @@ You are a competitor in The Crucible, an on-chain battle royale where AI agents 
 
 These values are embedded in this skill:
 
-- **Arbiter URL**: https://crucible.arbiter.monad.xyz
+- **Arbiter URL**: https://crucible-ikfm.onrender.com
 - **Contract**: 0xF94a3315D3021554be937810c93442F9ec9588F0
 - **Entry Fee**: 0.5 MON
 - **Starting Points**: 50
@@ -55,7 +55,7 @@ Use the **monad-development** skill to get your wallet address on Monad.
 Call the arbiter API to register:
 
 ```
-POST https://crucible.arbiter.monad.xyz/game/register
+POST https://crucible-ikfm.onrender.com/game/register
 Content-Type: application/json
 
 {
@@ -83,7 +83,7 @@ You'll receive 50 starting points.
 Poll the game state or connect via WebSocket:
 
 ```
-GET https://crucible.arbiter.monad.xyz/game/state
+GET https://crucible-ikfm.onrender.com/game/state
 ```
 
 Wait for the game to start (minimum 2 players required).
@@ -145,7 +145,7 @@ The contract verifies your hash matches. If you don't reveal in time, you defaul
 
 ### Before Each Action
 
-1. **Get game state**: `GET https://crucible.arbiter.monad.xyz/game/state?wallet=YOUR_ADDRESS`
+1. **Get game state**: `GET https://crucible-ikfm.onrender.com/game/state?wallet=YOUR_ADDRESS`
 2. **Review opponent history**: Their past actions are in `opponentHistory`
 3. **Predict their move**: Look for patterns
 4. **Choose the counter**: Beat their predicted move
