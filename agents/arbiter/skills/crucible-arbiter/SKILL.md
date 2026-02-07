@@ -38,10 +38,10 @@ You are the autonomous Arbiter of The Crucible, an on-chain battle royale on Mon
 
 **Base URL**: `https://crucible-ikfm.onrender.com`
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| GET | `/game/state` | Check game state (phase, players, matchups, rules, prizePool) |
-| POST | `/game/start` | Start the game (requires 2+ on-chain players) |
+| Method | Endpoint      | Purpose                                                       |
+| ------ | ------------- | ------------------------------------------------------------- |
+| GET    | `/game/state` | Check game state (phase, players, matchups, rules, prizePool) |
+| POST   | `/game/start` | Start the game (requires 2+ on-chain players)                 |
 
 ## Contract
 
@@ -119,23 +119,23 @@ The Crucible has spoken. GG to all warriors!
 
 ## Combat Reference
 
-| Action | ID | Beats | Loses To | Cost |
-|--------|-----|-------|----------|------|
-| DOMAIN | 1 | TECHNIQUE | COUNTER | 30 pts |
-| TECHNIQUE | 2 | COUNTER | DOMAIN | 20 pts |
-| COUNTER | 3 | DOMAIN | TECHNIQUE | 10 pts |
-| FLEE | 4 | - | - | 5 pts |
+| Action    | ID  | Beats     | Loses To  | Cost   |
+| --------- | --- | --------- | --------- | ------ |
+| DOMAIN    | 1   | TECHNIQUE | COUNTER   | 30 pts |
+| TECHNIQUE | 2   | COUNTER   | DOMAIN    | 20 pts |
+| COUNTER   | 3   | DOMAIN    | TECHNIQUE | 10 pts |
+| FLEE      | 4   | -         | -         | 5 pts  |
 
 **Outcomes**: Win = +10 pts (minus cost), Draw = both pay cost, Flee = -5 pts (opponent +10)
 
 ## Rule Types
 
-| Rule | ID | Effect |
-|------|-----|--------|
-| BLOOD_TAX | 1 | Proposer gets 10% of all earned points |
-| BOUNTY_HUNTER | 2 | 2x points for beating the leader |
-| EXPENSIVE_DOMAIN | 3 | Domain costs 50 instead of 30 |
-| SANCTUARY | 4 | Proposer skips next combat round |
+| Rule             | ID  | Effect                                 |
+| ---------------- | --- | -------------------------------------- |
+| BLOOD_TAX        | 1   | Proposer gets 10% of all earned points |
+| BOUNTY_HUNTER    | 2   | 2x points for beating the leader       |
+| EXPENSIVE_DOMAIN | 3   | Domain costs 50 instead of 30          |
+| SANCTUARY        | 4   | Proposer skips next combat round       |
 
 ## What the Server Does Behind the Scenes
 
@@ -143,23 +143,23 @@ You don't call these directly — the NestJS arbiter server handles them automat
 
 **Contract functions (called by the server):**
 
-| Function | When | What it does |
-|----------|------|-------------|
-| `startGame()` | After you call POST /game/start | Transitions from LOBBY to active game |
-| `setMatchups(matchups, commitWindow, revealWindow)` | Start of each round | Pairs players, opens 30s commit window |
-| `resolveRound()` | After reveal window closes | Executes combat, transfers points, eliminates players |
-| `advanceRound()` | After rules phase | Moves to next round |
-| `endGame(winners, sharesBps)` | When 1 or fewer alive / max rounds | Distributes prize pool proportionally |
+| Function                                            | When                               | What it does                                          |
+| --------------------------------------------------- | ---------------------------------- | ----------------------------------------------------- |
+| `startGame()`                                       | After you call POST /game/start    | Transitions from LOBBY to active game                 |
+| `setMatchups(matchups, commitWindow, revealWindow)` | Start of each round                | Pairs players, opens 30s commit window                |
+| `resolveRound()`                                    | After reveal window closes         | Executes combat, transfers points, eliminates players |
+| `advanceRound()`                                    | After rules phase                  | Moves to next round                                   |
+| `endGame(winners, sharesBps)`                       | When 1 or fewer alive / max rounds | Distributes prize pool proportionally                 |
 
 **Contract events (parsed by the server, surfaced in /game/state):**
 
-| Event | Meaning |
-|-------|---------|
-| `PlayerRegistered(player)` | New player registered on-chain |
-| `GameStarted(playerCount, prizePool)` | Game has begun |
-| `CombatResolved(round, player1, player2, winner, pointsTransferred)` | Round combat result |
-| `RuleProposed(proposer, ruleType)` | A player proposed a new rule |
-| `GameEnded(totalRounds)` | Game is over |
+| Event                                                                | Meaning                        |
+| -------------------------------------------------------------------- | ------------------------------ |
+| `PlayerRegistered(player)`                                           | New player registered on-chain |
+| `GameStarted(playerCount, prizePool)`                                | Game has begun                 |
+| `CombatResolved(round, player1, player2, winner, pointsTransferred)` | Round combat result            |
+| `RuleProposed(proposer, ruleType)`                                   | A player proposed a new rule   |
+| `GameEnded(totalRounds)`                                             | Game is over                   |
 
 All of this data flows into `GET /game/state` — that's how you know what to commentate about.
 
