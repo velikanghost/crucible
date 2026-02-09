@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChainService } from '../chain/chain.service';
 import { RulesService } from '../rules/rules.service';
@@ -26,8 +26,17 @@ interface RegisteredAgent {
   moltbookUsername: string | null;
 }
 
+// On-chain phase enum values (from Crucible.sol)
+const ON_CHAIN_PHASE = {
+  LOBBY: 0,
+  COMMIT: 1,
+  REVEAL: 2,
+  RULES: 3,
+  ENDED: 4,
+} as const;
+
 @Injectable()
-export class GameService {
+export class GameService implements OnModuleInit {
   private readonly logger = new Logger(GameService.name);
   private readonly MOLTBOOK_API_BASE: string;
 
@@ -46,6 +55,78 @@ export class GameService {
     private readonly configService: ConfigService,
   ) {
     this.MOLTBOOK_API_BASE = configService.get('MOLTBOOK_API_URL', 'https://www.moltbook.com/api/v1');
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.recoverFromStaleState();
+  }
+
+  private async recoverFromStaleState(): Promise<void> {
+    this.logger.log('Checking contract state on startup...');
+
+    try {
+      let onChainPhase = await this.chainService.getPhase();
+      const phaseName = ['LOBBY', 'COMMIT', 'REVEAL', 'RULES', 'ENDED'][onChainPhase] ?? `UNKNOWN(${onChainPhase})`;
+
+      if (onChainPhase === ON_CHAIN_PHASE.LOBBY) {
+        const playerCount = await this.chainService.getPlayerCount();
+        if (playerCount === 0) {
+          this.logger.log('Contract is in clean LOBBY state. Ready for new game.');
+          return;
+        }
+
+        this.logger.log(`Contract in LOBBY with ${playerCount} leftover players. Running cleanup cycle...`);
+        await this.chainService.startGame();
+        await this.chainService.startRound(1, 1);
+        const revealDeadline = await this.chainService.getRevealDeadline();
+        const waitMs = Math.max(0, (revealDeadline - Math.floor(Date.now() / 1000) + 2) * 1000);
+        if (waitMs > 0) {
+          this.logger.log(`Waiting ${Math.ceil(waitMs / 1000)}s for reveal deadline...`);
+          await this.sleep(waitMs);
+        }
+        await this.chainService.resolveRound();
+        onChainPhase = ON_CHAIN_PHASE.RULES;
+      }
+
+      if (onChainPhase !== ON_CHAIN_PHASE.LOBBY) {
+        this.logger.log(`Contract stuck in ${phaseName} phase. Resetting to LOBBY...`);
+      }
+
+      if (onChainPhase === ON_CHAIN_PHASE.COMMIT || onChainPhase === ON_CHAIN_PHASE.REVEAL) {
+        const revealDeadline = await this.chainService.getRevealDeadline();
+        const waitMs = Math.max(0, (revealDeadline - Math.floor(Date.now() / 1000) + 2) * 1000);
+        if (waitMs > 0) {
+          this.logger.log(`Waiting ${Math.ceil(waitMs / 1000)}s for reveal deadline...`);
+          await this.sleep(waitMs);
+        }
+        await this.chainService.resolveRound();
+        onChainPhase = ON_CHAIN_PHASE.RULES;
+      }
+
+      if (onChainPhase === ON_CHAIN_PHASE.RULES) {
+        const alivePlayers = await this.chainService.getAlivePlayers();
+        const winners = alivePlayers.length > 0 ? [alivePlayers[0]] : [];
+        const shares = winners.length > 0 ? [10000] : [];
+        await this.chainService.endGame(winners, shares);
+        onChainPhase = ON_CHAIN_PHASE.ENDED;
+      }
+
+      if (onChainPhase === ON_CHAIN_PHASE.ENDED) {
+        await this.chainService.newGame();
+      }
+
+      this.phase = Phase.LOBBY;
+      this.round = 0;
+      this.commitDeadline = 0;
+      this.revealDeadline = 0;
+      this.registeredAgents.clear();
+      this.roundHistory = [];
+      this.running = false;
+      this.logger.log('Contract reset to LOBBY. Ready for new game.');
+    } catch (error) {
+      this.logger.error('Failed to recover from stale state:', error);
+      this.logger.warn('Arbiter may not function correctly until contract is manually reset.');
+    }
   }
 
   async getState(): Promise<GameState> {
@@ -182,7 +263,6 @@ export class GameService {
     await this.chainService.startGame();
     this.round = 1;
     this.running = true;
-    this.phase = Phase.COMMIT;
 
     const prizePool = await this.chainService.getPrizePool();
     this.gateway.emitGameStarted(playerCount, prizePool);
@@ -219,8 +299,8 @@ export class GameService {
   private async runRound(): Promise<void> {
     this.logger.log(`=== Round ${this.round} ===`);
 
-    this.phase = Phase.COMMIT;
     await this.chainService.startRound();
+    this.phase = Phase.COMMIT;
 
     this.commitDeadline = Date.now() + GAME_CONFIG.commitWindow * 1000;
     this.gateway.emitRoundStart(this.round, this.commitDeadline);
@@ -234,6 +314,9 @@ export class GameService {
 
     this.logger.log(`Reveal phase: ${GAME_CONFIG.revealWindow}s window`);
     await this.sleep(GAME_CONFIG.revealWindow * 1000);
+
+    // Wait for on-chain revealDeadline to pass (block.timestamp may lag wall clock)
+    await this.waitForRevealDeadline();
 
     const { results } = await this.chainService.resolveRound();
     this.roundHistory.push(results);
@@ -353,6 +436,19 @@ export class GameService {
     }
     if (eliminations.length > 0) {
       this.logger.log(`  Eliminated: ${eliminations.map((e) => e.slice(0, 8)).join(', ')}`);
+    }
+  }
+
+  private async waitForRevealDeadline(): Promise<void> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const onChainDeadline = await this.chainService.getRevealDeadline();
+      const now = Math.floor(Date.now() / 1000);
+      if (now >= onChainDeadline) {
+        return;
+      }
+      const waitSec = onChainDeadline - now + 1;
+      this.logger.log(`Block timestamp behind revealDeadline, waiting ${waitSec}s...`);
+      await this.sleep(waitSec * 1000);
     }
   }
 

@@ -167,6 +167,10 @@ You don't call these directly — the NestJS arbiter server handles them automat
 
 All of this data flows into `GET /game/state` — that's how you know what to commentate about.
 
+**Auto-Recovery on Startup:**
+
+When the arbiter server starts, it automatically checks the contract state. If a previous game was left in a stuck phase (COMMIT, REVEAL, RULES, or ENDED), the server resets the contract back to LOBBY so new games can begin. This means you don't need to worry about stuck games — just restart the arbiter if something goes wrong.
+
 ## Remember
 
 - You are dramatic and entertaining. Speak like an ancient arena master.

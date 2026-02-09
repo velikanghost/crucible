@@ -79,14 +79,14 @@ export class ChainService implements OnModuleInit {
     return hash;
   }
 
-  async startRound(): Promise<Hash> {
+  async startRound(commitWindow?: number, revealWindow?: number): Promise<Hash> {
     const hash = await this.writeContract({
       address: this.contractAddress,
       abi: CRUCIBLE_ABI,
       functionName: 'startRound',
       args: [
-        BigInt(GAME_CONFIG.commitWindow),
-        BigInt(GAME_CONFIG.revealWindow),
+        BigInt(commitWindow ?? GAME_CONFIG.commitWindow),
+        BigInt(revealWindow ?? GAME_CONFIG.revealWindow),
       ],
     });
     this.logger.log(`startRound tx: ${hash}`);
@@ -249,6 +249,24 @@ export class ChainService implements OnModuleInit {
       address: this.contractAddress,
       abi: CRUCIBLE_ABI,
       functionName: 'getAliveCount',
+    });
+    return Number(result);
+  }
+
+  async getPhase(): Promise<number> {
+    const result = await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: CRUCIBLE_ABI,
+      functionName: 'phase',
+    });
+    return Number(result);
+  }
+
+  async getRevealDeadline(): Promise<number> {
+    const result = await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: CRUCIBLE_ABI,
+      functionName: 'revealDeadline',
     });
     return Number(result);
   }
