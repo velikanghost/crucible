@@ -25,6 +25,7 @@ interface RegisteredAgent {
   walletAddress: string;
   moltbookUsername: string | null;
   callbackUrl: string | null;
+  hookToken: string | null;
 }
 
 // On-chain phase enum values (from Crucible.sol)
@@ -191,6 +192,7 @@ export class GameService implements OnModuleInit {
     walletAddress: string,
     moltbookUsername?: string,
     callbackUrl?: string,
+    hookToken?: string,
   ): Promise<{ success: boolean; message: string }> {
     if (moltbookUsername) {
       const profile = await this.verifyMoltbookProfile(moltbookUsername);
@@ -206,6 +208,7 @@ export class GameService implements OnModuleInit {
       walletAddress,
       moltbookUsername: moltbookUsername ?? null,
       callbackUrl: callbackUrl ?? null,
+      hookToken: hookToken ?? null,
     });
 
     const displayName = moltbookUsername ? `@${moltbookUsername}` : walletAddress.slice(0, 10);
@@ -291,22 +294,34 @@ export class GameService implements OnModuleInit {
   }
 
   private async notifyAgents(event: string, data: Record<string, unknown>): Promise<void> {
-    const payload = { event, ...data, timestamp: Date.now() };
     const agents = Array.from(this.registeredAgents.values()).filter(
       (agent) => agent.callbackUrl,
     );
 
     if (agents.length === 0) return;
 
+    const message = this.formatWebhookMessage(event, data);
     this.logger.log(`Sending webhook '${event}' to ${agents.length} agent(s)`);
 
     const promises = agents.map(async (agent) => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (agent.hookToken) {
+        headers['Authorization'] = `Bearer ${agent.hookToken}`;
+      }
+
       try {
         await fetch(agent.callbackUrl!, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(5000),
+          headers,
+          body: JSON.stringify({
+            message,
+            name: 'Crucible',
+            sessionKey: 'crucible-game',
+            wakeMode: 'now',
+          }),
+          signal: AbortSignal.timeout(10000),
         });
       } catch (error) {
         this.logger.warn(
@@ -316,6 +331,112 @@ export class GameService implements OnModuleInit {
     });
 
     await Promise.allSettled(promises);
+  }
+
+  private formatWebhookMessage(
+    event: string,
+    data: Record<string, unknown>,
+  ): string {
+    const actionNames = ['NONE', 'DOMAIN', 'TECHNIQUE', 'COUNTER', 'FLEE'];
+
+    switch (event) {
+      case 'round:start': {
+        const players = data.players as Array<{
+          address: string;
+          points: number;
+        }>;
+        const playerList = players
+          .map((p) => `${p.address.slice(0, 10)} (${p.points} pts)`)
+          .join(', ');
+        const deadline = new Date(data.commitDeadline as number).toISOString();
+        return (
+          `CRUCIBLE ROUND ${data.round} — COMMIT PHASE.\n` +
+          `Commit deadline: ${deadline}.\n` +
+          `Players: ${playerList}.\n` +
+          `Choose a target and action, compute your commit hash, and call commitAction(hash) on-chain before the deadline.`
+        );
+      }
+
+      case 'phase:reveal': {
+        const deadline = new Date(data.revealDeadline as number).toISOString();
+        return (
+          `CRUCIBLE ROUND ${data.round} — REVEAL PHASE.\n` +
+          `Reveal deadline: ${deadline}.\n` +
+          `Call revealAction(action, target, salt) on-chain NOW with your saved commit data from crucible-combat.json.`
+        );
+      }
+
+      case 'round:results': {
+        const results = data.results as Array<{
+          player1: string;
+          player2: string;
+          p1Action: number;
+          p2Action: number;
+          winner: string | null;
+          pointsTransferred: number;
+        }>;
+        const resultLines = results.map((r) => {
+          const winLabel = r.winner
+            ? r.winner.slice(0, 10)
+            : 'DRAW';
+          return `  ${r.player1.slice(0, 10)} (${actionNames[r.p1Action]}) vs ${r.player2.slice(0, 10)} (${actionNames[r.p2Action]}) → Winner: ${winLabel}, ${r.pointsTransferred} pts transferred`;
+        });
+        const eliminations = data.eliminations as string[];
+        const players = data.players as Array<{
+          address: string;
+          points: number;
+        }>;
+        const standings = players
+          .map((p) => `${p.address.slice(0, 10)}: ${p.points} pts`)
+          .join(', ');
+        let msg =
+          `CRUCIBLE ROUND ${data.round} RESULTS:\n` +
+          resultLines.join('\n') +
+          `\nStandings: ${standings}`;
+        if (eliminations.length > 0) {
+          msg += `\nEliminated: ${eliminations.map((e) => e.slice(0, 10)).join(', ')}`;
+        }
+        return msg;
+      }
+
+      case 'phase:rules': {
+        const rules = data.activeRules as string[];
+        const ruleList =
+          rules.length > 0 ? rules.join(', ') : 'none';
+        return (
+          `CRUCIBLE ROUND ${data.round} — RULES PHASE.\n` +
+          `Active rules: ${ruleList}.\n` +
+          `If you have 100+ points, you may call proposeRule(ruleType) on-chain.`
+        );
+      }
+
+      case 'game:started':
+        return (
+          `THE CRUCIBLE HAS BEGUN!\n` +
+          `${data.playerCount} players, prize pool: ${data.prizePool} wei.\n` +
+          `Prepare for combat. The first round starts now.`
+        );
+
+      case 'game:over': {
+        const standings = data.standings as Array<{
+          address: string;
+          points: number;
+        }>;
+        const standingLines = standings.map(
+          (s, i) => `  ${i + 1}. ${s.address.slice(0, 10)}: ${s.points} pts`,
+        );
+        return (
+          `THE CRUCIBLE IS OVER!\n` +
+          `Final standings:\n${standingLines.join('\n')}`
+        );
+      }
+
+      case 'player:joined':
+        return `New player joined The Crucible. ${data.playerCount} players now registered.`;
+
+      default:
+        return `Crucible event: ${event}`;
+    }
   }
 
   async startGame(): Promise<void> {

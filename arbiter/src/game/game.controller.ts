@@ -37,6 +37,7 @@ export class GameController {
       dto.walletAddress,
       dto.moltbookUsername,
       dto.callbackUrl,
+      dto.hookToken,
     );
   }
 

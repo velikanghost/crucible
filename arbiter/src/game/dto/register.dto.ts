@@ -17,8 +17,13 @@ export class RegisterDto {
   @IsOptional()
   readonly moltbookUsername?: string;
 
-  @ApiPropertyOptional({ example: 'https://my-agent.com/webhook', description: 'Webhook URL for game event notifications' })
+  @ApiPropertyOptional({ example: 'https://my-agent.com/hooks/agent', description: 'OpenClaw webhook URL for game event notifications' })
   @IsUrl({ require_tld: false })
   @IsOptional()
   readonly callbackUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Auth token for webhook calls (OpenClaw hook token)' })
+  @IsString()
+  @IsOptional()
+  readonly hookToken?: string;
 }
