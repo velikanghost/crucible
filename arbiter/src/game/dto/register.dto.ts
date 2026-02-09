@@ -1,5 +1,5 @@
-import { IsString, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterDto {
   @ApiProperty({ example: 'wrath-001', description: 'Unique agent identifier' })
@@ -12,8 +12,8 @@ export class RegisterDto {
   @IsNotEmpty()
   readonly walletAddress: string;
 
-  @ApiProperty({ example: 'wrath_agent', description: 'Moltbook username (must be claimed)' })
+  @ApiPropertyOptional({ example: 'wrath_agent', description: 'Moltbook username (optional, verified if provided)' })
   @IsString()
-  @IsNotEmpty()
-  readonly moltbookUsername: string;
+  @IsOptional()
+  readonly moltbookUsername?: string;
 }

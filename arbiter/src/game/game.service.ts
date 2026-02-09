@@ -14,7 +14,6 @@ import {
 interface MoltbookProfile {
   name: string;
   description?: string;
-  karma: number;
   is_claimed: boolean;
   owner?: {
     x_handle?: string;
@@ -24,8 +23,7 @@ interface MoltbookProfile {
 
 interface RegisteredAgent {
   walletAddress: string;
-  moltbookUsername: string;
-  karma: number;
+  moltbookUsername: string | null;
 }
 
 @Injectable()
@@ -109,31 +107,35 @@ export class GameService {
   async registerAgent(
     agentId: string,
     walletAddress: string,
-    moltbookUsername: string,
+    moltbookUsername?: string,
   ): Promise<{ success: boolean; message: string }> {
-    const profile = await this.verifyMoltbookProfile(moltbookUsername);
+    if (moltbookUsername) {
+      const profile = await this.verifyMoltbookProfile(moltbookUsername);
 
-    if (!profile.is_claimed) {
-      throw new BadRequestException(
-        `Moltbook account @${moltbookUsername} is not claimed. Only verified agents can join.`,
-      );
+      if (!profile.is_claimed) {
+        throw new BadRequestException(
+          `Moltbook account @${moltbookUsername} is not claimed. Only verified agents can join.`,
+        );
+      }
     }
 
     this.registeredAgents.set(agentId, {
       walletAddress,
-      moltbookUsername,
-      karma: profile.karma,
+      moltbookUsername: moltbookUsername ?? null,
     });
 
+    const displayName = moltbookUsername ? `@${moltbookUsername}` : walletAddress.slice(0, 10);
     this.logger.log(
-      `Agent ${agentId} (@${moltbookUsername}) registered with wallet ${walletAddress} | Karma: ${profile.karma}`,
+      `Agent ${agentId} (${displayName}) registered with wallet ${walletAddress}`,
     );
 
-    this.gateway.emitPlayerJoined(agentId, walletAddress, moltbookUsername);
+    this.gateway.emitPlayerJoined(agentId, walletAddress, moltbookUsername ?? agentId);
 
     return {
       success: true,
-      message: `Verified! @${moltbookUsername} can now call register() on-chain with 0.5 MON.`,
+      message: moltbookUsername
+        ? `Verified! @${moltbookUsername} can now call register() on-chain with 0.5 MON.`
+        : `Registered! ${agentId} can now call register() on-chain with 0.5 MON.`,
     };
   }
 

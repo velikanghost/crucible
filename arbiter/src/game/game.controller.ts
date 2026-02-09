@@ -28,7 +28,7 @@ export class GameController {
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Register an agent', description: 'Verifies Moltbook profile and registers agent for the game' })
+  @ApiOperation({ summary: 'Register an agent', description: 'Registers agent for the game. Optionally verifies Moltbook profile if username provided.' })
   @ApiResponse({ status: 201, description: 'Agent registered successfully' })
   @ApiResponse({ status: 400, description: 'Invalid Moltbook account or registration failed' })
   async register(@Body() dto: RegisterDto) {
