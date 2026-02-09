@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ChainService } from '../chain/chain.service';
 import { RulesService } from '../rules/rules.service';
 import { GameGateway } from './game.gateway';
@@ -30,10 +31,12 @@ interface RegisteredAgent {
 @Injectable()
 export class GameService {
   private readonly logger = new Logger(GameService.name);
-  private readonly MOLTBOOK_API_BASE = 'https://www.moltbook.com/api/v1';
+  private readonly MOLTBOOK_API_BASE: string;
 
   private phase: Phase = Phase.LOBBY;
   private round = 0;
+  private commitDeadline = 0;
+  private revealDeadline = 0;
   private registeredAgents: Map<string, RegisteredAgent> = new Map();
   private roundHistory: CombatResult[][] = [];
   private running = false;
@@ -42,7 +45,10 @@ export class GameService {
     private readonly chainService: ChainService,
     private readonly rulesService: RulesService,
     private readonly gateway: GameGateway,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.MOLTBOOK_API_BASE = configService.get('MOLTBOOK_API_URL', 'https://www.moltbook.com/api/v1');
+  }
 
   async getState(): Promise<GameState> {
     const alivePlayers = await this.chainService.getAlivePlayers();
@@ -56,14 +62,16 @@ export class GameService {
       players: playerStates,
       activeRules,
       prizePool,
-      commitDeadline: 0,
-      revealDeadline: 0,
+      commitDeadline: this.commitDeadline,
+      revealDeadline: this.revealDeadline,
     };
   }
 
   async getStateForAgent(walletAddress: string): Promise<{
     phase: Phase;
     round: number;
+    commitDeadline: number;
+    revealDeadline: number;
     you: PlayerState | null;
     opponents: PlayerState[];
     activeRules: string[];
@@ -88,6 +96,8 @@ export class GameService {
     return {
       phase: this.phase,
       round: this.round,
+      commitDeadline: this.commitDeadline,
+      revealDeadline: this.revealDeadline,
       you,
       opponents,
       activeRules: this.rulesService.formatRulesForAgents(activeRules),
@@ -176,7 +186,11 @@ export class GameService {
     this.gateway.emitGameStarted(playerCount, prizePool);
 
     this.logger.log(`Game started with ${playerCount} players`);
-    await this.runGameLoop();
+    this.runGameLoop().catch((err) => {
+      this.logger.error('Game loop fatal error:', err);
+      this.running = false;
+      this.phase = Phase.ENDED;
+    });
   }
 
   private async runGameLoop(): Promise<void> {
@@ -206,15 +220,15 @@ export class GameService {
     this.phase = Phase.COMMIT;
     await this.chainService.startRound();
 
-    const commitDeadline = Date.now() + GAME_CONFIG.commitWindow * 1000;
-    this.gateway.emitRoundStart(this.round, commitDeadline);
+    this.commitDeadline = Date.now() + GAME_CONFIG.commitWindow * 1000;
+    this.gateway.emitRoundStart(this.round, this.commitDeadline);
 
     this.logger.log(`Commit phase: ${GAME_CONFIG.commitWindow}s window`);
     await this.sleep(GAME_CONFIG.commitWindow * 1000);
 
     this.phase = Phase.REVEAL;
-    const revealDeadline = Date.now() + GAME_CONFIG.revealWindow * 1000;
-    this.gateway.emitRevealPhase(revealDeadline);
+    this.revealDeadline = Date.now() + GAME_CONFIG.revealWindow * 1000;
+    this.gateway.emitRevealPhase(this.revealDeadline);
 
     this.logger.log(`Reveal phase: ${GAME_CONFIG.revealWindow}s window`);
     await this.sleep(GAME_CONFIG.revealWindow * 1000);
@@ -283,6 +297,8 @@ export class GameService {
     this.registeredAgents.clear();
     this.roundHistory = [];
     this.round = 0;
+    this.commitDeadline = 0;
+    this.revealDeadline = 0;
     this.phase = Phase.LOBBY;
     this.logger.log('Contract reset to LOBBY. Ready for new game.');
   }

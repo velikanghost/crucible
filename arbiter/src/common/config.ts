@@ -1,6 +1,6 @@
 export const GAME_CONFIG = {
   commitWindow: 30,
-  revealWindow: 15,
+  revealWindow: 30,
   ruleWindow: 20,
   minPlayers: 2,
   maxRounds: 20,

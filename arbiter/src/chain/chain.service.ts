@@ -60,11 +60,13 @@ export class ChainService implements OnModuleInit {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private writeContract(params: Record<string, any>): Promise<Hash> {
-    return this.walletClient.writeContract({
+  private async writeContract(params: Record<string, any>): Promise<Hash> {
+    const hash = await this.walletClient.writeContract({
       ...params,
       chain: monadTestnet,
     } as unknown as Parameters<typeof this.walletClient.writeContract>[0]);
+    await this.publicClient.waitForTransactionReceipt({ hash });
+    return hash;
   }
 
   async startGame(): Promise<Hash> {
@@ -177,7 +179,7 @@ export class ChainService implements OnModuleInit {
   }
 
   async getPlayerInfo(address: string): Promise<PlayerState> {
-    const [points, alive] = (await this.publicClient.readContract({
+    const [points, alive, registered] = (await this.publicClient.readContract({
       address: this.contractAddress,
       abi: CRUCIBLE_ABI,
       functionName: 'getPlayerInfo',
@@ -188,6 +190,7 @@ export class ChainService implements OnModuleInit {
       address,
       points: Number(points),
       alive,
+      registered,
     };
   }
 

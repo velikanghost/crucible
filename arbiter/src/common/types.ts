@@ -26,6 +26,7 @@ export interface PlayerState {
   readonly address: string;
   readonly points: number;
   readonly alive: boolean;
+  readonly registered: boolean;
 }
 
 export interface CombatResult {

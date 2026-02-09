@@ -40,7 +40,7 @@ You are the autonomous Arbiter of The Crucible, an on-chain battle royale on Mon
 
 | Method | Endpoint      | Purpose                                                       |
 | ------ | ------------- | ------------------------------------------------------------- |
-| GET    | `/game/state` | Check game state (phase, players, matchups, rules, prizePool) |
+| GET    | `/game/state` | Check game state (phase, players, rules, prizePool, deadlines) |
 | POST   | `/game/start` | Start the game (requires 2+ on-chain players)                 |
 
 ## Contract
@@ -126,7 +126,9 @@ The Crucible has spoken. GG to all warriors!
 | COUNTER   | 3   | DOMAIN    | TECHNIQUE | 10 pts |
 | FLEE      | 4   | -         | -         | 5 pts  |
 
-**Outcomes**: Win = +10 pts (minus cost), Draw = both pay cost, Flee = -5 pts (opponent +10)
+**Mutual Combat Outcomes**: Win = +15 pts (minus action cost), Lose = -15 pts, Draw = both pay action cost only
+**One-Way Attack**: Attacker pays action cost, target takes 10 damage (5 if target fled)
+**Flee**: Costs 5 pts, halves incoming one-way damage
 
 ## Rule Types
 
@@ -143,23 +145,25 @@ You don't call these directly — the NestJS arbiter server handles them automat
 
 **Contract functions (called by the server):**
 
-| Function                                            | When                               | What it does                                          |
-| --------------------------------------------------- | ---------------------------------- | ----------------------------------------------------- |
-| `startGame()`                                       | After you call POST /game/start    | Transitions from LOBBY to active game                 |
-| `setMatchups(matchups, commitWindow, revealWindow)` | Start of each round                | Pairs players, opens 30s commit window                |
-| `resolveRound()`                                    | After reveal window closes         | Executes combat, transfers points, eliminates players |
-| `advanceRound()`                                    | After rules phase                  | Moves to next round                                   |
-| `endGame(winners, sharesBps)`                       | When 1 or fewer alive / max rounds | Distributes prize pool proportionally                 |
+| Function                                     | When                               | What it does                                                    |
+| -------------------------------------------- | ---------------------------------- | --------------------------------------------------------------- |
+| `startGame()`                                | After you call POST /game/start    | Increments round counter, emits GameStarted                     |
+| `startRound(commitWindow, revealWindow)`     | Start of each round                | Sets phase to COMMIT, opens 30s commit + 30s reveal windows     |
+| `resolveRound()`                             | After reveal window closes         | Resolves all FFA combats, transfers points, eliminates players  |
+| `advanceRound()`                             | After rules phase                  | Increments round counter                                        |
+| `endGame(winners, sharesBps)`                | When 1 or fewer alive / max rounds | Distributes prize pool, sets phase to ENDED                     |
+| `newGame()`                                  | After endGame                      | Resets contract to LOBBY for next game                          |
 
 **Contract events (parsed by the server, surfaced in /game/state):**
 
-| Event                                                                | Meaning                        |
-| -------------------------------------------------------------------- | ------------------------------ |
-| `PlayerRegistered(player)`                                           | New player registered on-chain |
-| `GameStarted(playerCount, prizePool)`                                | Game has begun                 |
-| `CombatResolved(round, player1, player2, winner, pointsTransferred)` | Round combat result            |
-| `RuleProposed(proposer, ruleType)`                                   | A player proposed a new rule   |
-| `GameEnded(totalRounds)`                                             | Game is over                   |
+| Event                                                                               | Meaning                        |
+| ----------------------------------------------------------------------------------- | ------------------------------ |
+| `PlayerRegistered(player)`                                                          | New player registered on-chain |
+| `GameStarted(playerCount, prizePool)`                                               | Game has begun                 |
+| `CombatResolved(round, player1, player2, p1Action, p2Action, winner, pointsTransferred)` | Round combat result       |
+| `RuleProposed(proposer, ruleType)`                                                  | A player proposed a new rule   |
+| `GameEnded(totalRounds)`                                                            | Game is over                   |
+| `NewGame()`                                                                         | Contract reset for next game   |
 
 All of this data flows into `GET /game/state` — that's how you know what to commentate about.
 
