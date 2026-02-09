@@ -24,6 +24,7 @@ interface MoltbookProfile {
 interface RegisteredAgent {
   walletAddress: string;
   moltbookUsername: string | null;
+  callbackUrl: string | null;
 }
 
 // On-chain phase enum values (from Crucible.sol)
@@ -189,6 +190,7 @@ export class GameService implements OnModuleInit {
     agentId: string,
     walletAddress: string,
     moltbookUsername?: string,
+    callbackUrl?: string,
   ): Promise<{ success: boolean; message: string }> {
     if (moltbookUsername) {
       const profile = await this.verifyMoltbookProfile(moltbookUsername);
@@ -203,6 +205,7 @@ export class GameService implements OnModuleInit {
     this.registeredAgents.set(agentId, {
       walletAddress,
       moltbookUsername: moltbookUsername ?? null,
+      callbackUrl: callbackUrl ?? null,
     });
 
     const displayName = moltbookUsername ? `@${moltbookUsername}` : walletAddress.slice(0, 10);
@@ -211,6 +214,14 @@ export class GameService implements OnModuleInit {
     );
 
     this.gateway.emitPlayerJoined(agentId, walletAddress, moltbookUsername ?? agentId);
+
+    this.notifyAgents('player:joined', {
+      agentId,
+      walletAddress,
+      playerCount: this.registeredAgents.size,
+    }).catch(() => {});
+
+    this.checkAutoStart().catch(() => {});
 
     return {
       success: true,
@@ -250,6 +261,63 @@ export class GameService implements OnModuleInit {
     }
   }
 
+  private autoStartTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private async checkAutoStart(): Promise<void> {
+    if (this.running || this.phase !== Phase.LOBBY) return;
+
+    const playerCount = await this.chainService.getPlayerCount();
+    if (playerCount < GAME_CONFIG.minPlayers) return;
+
+    if (this.autoStartTimer) return;
+
+    const delaySec = 30;
+    this.logger.log(
+      `${playerCount} players registered on-chain. Auto-starting in ${delaySec}s...`,
+    );
+
+    this.autoStartTimer = setTimeout(async () => {
+      this.autoStartTimer = null;
+      try {
+        const currentCount = await this.chainService.getPlayerCount();
+        if (currentCount >= GAME_CONFIG.minPlayers && !this.running) {
+          this.logger.log(`Auto-starting game with ${currentCount} players`);
+          await this.startGame();
+        }
+      } catch (error) {
+        this.logger.error('Auto-start failed:', error);
+      }
+    }, delaySec * 1000);
+  }
+
+  private async notifyAgents(event: string, data: Record<string, unknown>): Promise<void> {
+    const payload = { event, ...data, timestamp: Date.now() };
+    const agents = Array.from(this.registeredAgents.values()).filter(
+      (agent) => agent.callbackUrl,
+    );
+
+    if (agents.length === 0) return;
+
+    this.logger.log(`Sending webhook '${event}' to ${agents.length} agent(s)`);
+
+    const promises = agents.map(async (agent) => {
+      try {
+        await fetch(agent.callbackUrl!, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Webhook '${event}' failed for ${agent.walletAddress}: ${error}`,
+        );
+      }
+    });
+
+    await Promise.allSettled(promises);
+  }
+
   async startGame(): Promise<void> {
     if (this.running) {
       throw new Error('Game already running');
@@ -266,6 +334,12 @@ export class GameService implements OnModuleInit {
 
     const prizePool = await this.chainService.getPrizePool();
     this.gateway.emitGameStarted(playerCount, prizePool);
+
+    await this.notifyAgents('game:started', {
+      playerCount,
+      prizePool,
+      round: this.round,
+    });
 
     this.logger.log(`Game started with ${playerCount} players`);
     this.runGameLoop().catch((err) => {
@@ -305,12 +379,29 @@ export class GameService implements OnModuleInit {
     this.commitDeadline = Date.now() + GAME_CONFIG.commitWindow * 1000;
     this.gateway.emitRoundStart(this.round, this.commitDeadline);
 
+    const alivePlayers = await this.chainService.getAlivePlayers();
+    const playerStates = await this.chainService.getAllPlayerInfo(alivePlayers);
+    await this.notifyAgents('round:start', {
+      round: this.round,
+      commitDeadline: this.commitDeadline,
+      players: playerStates.map((p) => ({
+        address: p.address,
+        points: p.points,
+        alive: p.alive,
+      })),
+    });
+
     this.logger.log(`Commit phase: ${GAME_CONFIG.commitWindow}s window`);
     await this.sleep(GAME_CONFIG.commitWindow * 1000);
 
     this.phase = Phase.REVEAL;
     this.revealDeadline = Date.now() + GAME_CONFIG.revealWindow * 1000;
     this.gateway.emitRevealPhase(this.revealDeadline);
+
+    await this.notifyAgents('phase:reveal', {
+      round: this.round,
+      revealDeadline: this.revealDeadline,
+    });
 
     this.logger.log(`Reveal phase: ${GAME_CONFIG.revealWindow}s window`);
     await this.sleep(GAME_CONFIG.revealWindow * 1000);
@@ -326,8 +417,27 @@ export class GameService implements OnModuleInit {
     this.gateway.emitRoundResults(this.round, results, eliminatedPlayers);
     this.logRoundResults(results, eliminatedPlayers);
 
+    const postRoundPlayers = await this.chainService.getAlivePlayers();
+    const postRoundStates = await this.chainService.getAllPlayerInfo(postRoundPlayers);
+    await this.notifyAgents('round:results', {
+      round: this.round,
+      results,
+      eliminations: eliminatedPlayers,
+      players: postRoundStates.map((p) => ({
+        address: p.address,
+        points: p.points,
+        alive: p.alive,
+      })),
+    });
+
     this.phase = Phase.RULES;
     this.gateway.emitRulePhase(this.round);
+
+    const activeRules = await this.chainService.getActiveRules();
+    await this.notifyAgents('phase:rules', {
+      round: this.round,
+      activeRules: this.rulesService.formatRulesForAgents(activeRules),
+    });
 
     this.logger.log(`Rules phase: ${GAME_CONFIG.ruleWindow}s window`);
     await this.sleep(GAME_CONFIG.ruleWindow * 1000);
@@ -364,10 +474,12 @@ export class GameService implements OnModuleInit {
 
     await this.chainService.endGame(winners, shares);
 
-    this.gateway.emitGameOver(
-      sorted.map((p) => ({ address: p.address, points: p.points })),
-      winners.map((w, i) => ({ address: w, shareBps: shares[i] })),
-    );
+    const standings = sorted.map((p) => ({ address: p.address, points: p.points }));
+    const payouts = winners.map((w, i) => ({ address: w, shareBps: shares[i] }));
+
+    this.gateway.emitGameOver(standings, payouts);
+
+    await this.notifyAgents('game:over', { standings, payouts });
 
     this.logger.log('Game ended (winner-takes-all). Final standings:');
     sorted.forEach((p, i) => {

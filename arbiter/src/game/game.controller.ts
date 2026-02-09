@@ -36,6 +36,7 @@ export class GameController {
       dto.agentId,
       dto.walletAddress,
       dto.moltbookUsername,
+      dto.callbackUrl,
     );
   }
 

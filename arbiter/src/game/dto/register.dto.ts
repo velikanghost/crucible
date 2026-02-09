@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsUrl } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterDto {
@@ -16,4 +16,9 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   readonly moltbookUsername?: string;
+
+  @ApiPropertyOptional({ example: 'https://my-agent.com/webhook', description: 'Webhook URL for game event notifications' })
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  readonly callbackUrl?: string;
 }
