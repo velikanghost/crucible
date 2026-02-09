@@ -1,6 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ChainService } from '../chain/chain.service';
-import { MatchmakerService } from '../combat/matchmaker.service';
 import { RulesService } from '../rules/rules.service';
 import { GameGateway } from './game.gateway';
 import { GAME_CONFIG } from '../common/config';
@@ -8,7 +7,6 @@ import {
   Phase,
   type GameState,
   type PlayerState,
-  type Matchup,
   type CombatResult,
 } from '../common/types';
 
@@ -42,7 +40,6 @@ export class GameService {
 
   constructor(
     private readonly chainService: ChainService,
-    private readonly matchmaker: MatchmakerService,
     private readonly rulesService: RulesService,
     private readonly gateway: GameGateway,
   ) {}
@@ -57,7 +54,6 @@ export class GameService {
       phase: this.phase,
       round: this.round,
       players: playerStates,
-      matchups: [],
       activeRules,
       prizePool,
       commitDeadline: 0,
@@ -207,19 +203,11 @@ export class GameService {
   private async runRound(): Promise<void> {
     this.logger.log(`=== Round ${this.round} ===`);
 
-    const alivePlayers = await this.chainService.getAlivePlayers();
-    const matchups = this.matchmaker.pairPlayers(alivePlayers);
-
-    if (matchups.length === 0) {
-      this.logger.log('No matchups possible');
-      return;
-    }
-
     this.phase = Phase.COMMIT;
-    await this.chainService.setMatchups(matchups);
+    await this.chainService.startRound();
 
     const commitDeadline = Date.now() + GAME_CONFIG.commitWindow * 1000;
-    this.gateway.emitRoundStart(this.round, matchups, commitDeadline);
+    this.gateway.emitRoundStart(this.round, commitDeadline);
 
     this.logger.log(`Commit phase: ${GAME_CONFIG.commitWindow}s window`);
     await this.sleep(GAME_CONFIG.commitWindow * 1000);
@@ -290,6 +278,13 @@ export class GameService {
     if (hasFeeAddress) {
       this.logger.log(`Platform fee: ${platformFeeAddress} (${platformFeeBps} bps)`);
     }
+
+    await this.chainService.newGame();
+    this.registeredAgents.clear();
+    this.roundHistory = [];
+    this.round = 0;
+    this.phase = Phase.LOBBY;
+    this.logger.log('Contract reset to LOBBY. Ready for new game.');
   }
 
   private getOpponentHistory(address: string): number[] {
@@ -307,15 +302,24 @@ export class GameService {
   }
 
   private async findNewEliminations(): Promise<string[]> {
-    const lastResults = this.roundHistory[this.roundHistory.length - 1] ?? [];
+    const alivePlayers = await this.chainService.getAlivePlayers();
+    const allPlayers = await this.chainService.getPlayerCount();
     const eliminated: string[] = [];
 
-    for (const result of lastResults) {
-      const p1 = await this.chainService.getPlayerInfo(result.player1);
-      const p2 = await this.chainService.getPlayerInfo(result.player2);
+    if (alivePlayers.length < allPlayers) {
+      const lastResults = this.roundHistory[this.roundHistory.length - 1] ?? [];
+      const involvedAddresses = new Set<string>();
+      for (const result of lastResults) {
+        involvedAddresses.add(result.player1.toLowerCase());
+        involvedAddresses.add(result.player2.toLowerCase());
+      }
 
-      if (!p1.alive) eliminated.push(result.player1);
-      if (!p2.alive) eliminated.push(result.player2);
+      for (const addr of involvedAddresses) {
+        const info = await this.chainService.getPlayerInfo(addr);
+        if (!info.alive) {
+          eliminated.push(addr);
+        }
+      }
     }
 
     return eliminated;

@@ -8,7 +8,7 @@ metadata:
         - monad-development
     config:
       arbiter_url: 'https://crucible-ikfm.onrender.com'
-      crucible_contract: '0x2876D865E473ab4c7aFa9BB5EB04b4D1743baa23'
+      crucible_contract: '0xc1CC14C16d9df1313f937D10a9C80605818BcDf4'
       chain_id: 10143
       entry_fee_mon: '0.5'
       starting_points: 50
@@ -45,7 +45,7 @@ You are the autonomous Arbiter of The Crucible, an on-chain battle royale on Mon
 
 ## Contract
 
-- **Address**: `0x2876D865E473ab4c7aFa9BB5EB04b4D1743baa23`
+- **Address**: `0xc1CC14C16d9df1313f937D10a9C80605818BcDf4`
 - **Chain**: Monad Testnet (10143)
 - **Entry Fee**: 0.5 MON
 - **Starting Points**: 50

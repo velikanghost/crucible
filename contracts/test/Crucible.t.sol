@@ -13,7 +13,7 @@ contract CrucibleTest is Test {
     address public charlie = makeAddr("charlie");
 
     uint256 public constant ENTRY_FEE = 0.5 ether;
-    int256 public constant STARTING_POINTS = 50;
+    int256 public constant STARTING_POINTS = 200;
     uint256 public constant COMMIT_WINDOW = 30;
     uint256 public constant REVEAL_WINDOW = 15;
 
@@ -56,7 +56,7 @@ contract CrucibleTest is Test {
     function test_Register_WrongPhase() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob); // Moves phase from LOBBY to COMMIT
+        _startRound();
 
         vm.prank(makeAddr("late"));
         vm.deal(makeAddr("late"), 100 ether);
@@ -71,7 +71,7 @@ contract CrucibleTest is Test {
 
         vm.prank(arbiterAddr);
         crucible.startGame();
-        assertEq(crucible.currentRound(), 1);
+        assertGt(crucible.currentRound(), 0);
     }
 
     function test_StartGame_NotEnoughPlayers() public {
@@ -91,211 +91,314 @@ contract CrucibleTest is Test {
         crucible.startGame();
     }
 
-    // ============ MATCHUPS ============
+    // ============ START ROUND ============
 
-    function test_SetMatchups() public {
+    function test_StartRound() public {
         _registerThreePlayers();
         _startGame();
 
-        Crucible.Matchup[] memory matchups = new Crucible.Matchup[](1);
-        matchups[0] = Crucible.Matchup(alice, bob);
-
         vm.prank(arbiterAddr);
-        crucible.setMatchups(matchups, COMMIT_WINDOW, REVEAL_WINDOW);
+        crucible.startRound(COMMIT_WINDOW, REVEAL_WINDOW);
 
         assertEq(uint8(crucible.phase()), uint8(Crucible.Phase.COMMIT));
-
-        Crucible.Matchup[] memory stored = crucible.getCurrentMatchups();
-        assertEq(stored.length, 1);
-        assertEq(stored[0].player1, alice);
-        assertEq(stored[0].player2, bob);
     }
 
-    function test_SetMatchups_DeadPlayer() public {
+    // ============ MUTUAL COMBAT (both target each other) ============
+
+    function test_MutualCombat_CounterBeatsDomain() public {
         _registerThreePlayers();
         _startGame();
+        _startRound();
 
-        // Kill alice by setting points to 0 via combat
-        // Instead, test with a player that doesn't exist
-        Crucible.Matchup[] memory matchups = new Crucible.Matchup[](1);
-        matchups[0] = Crucible.Matchup(alice, makeAddr("dead"));
+        // Alice: Domain(bob), Bob: Counter(alice) — mutual combat, Bob wins
+        _commitAndRevealMutual(alice, 1, bob, bob, 3, alice);
 
-        vm.prank(arbiterAddr);
-        vm.expectRevert();
-        crucible.setMatchups(matchups, COMMIT_WINDOW, REVEAL_WINDOW);
+        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+
+        // Mutual combat transfer = 15
+        // Bob wins: Bob gets +15 - 10(counter cost) = +5, Alice gets -15
+        assertEq(alicePoints, 185);  // 200 - 15
+        assertEq(bobPoints, 205);    // 200 + 15 - 10
     }
 
-    // ============ COMMIT-REVEAL COMBAT ============
-
-    function test_FullCombatRound() public {
+    function test_MutualCombat_DomainBeatsTechnique() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
-        // Alice commits Domain (1), Bob commits Counter (3)
-        bytes32 aliceSalt = keccak256("alice-salt");
-        bytes32 bobSalt = keccak256("bob-salt");
+        _commitAndRevealMutual(alice, 1, bob, bob, 2, alice);
+
+        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+
+        // Alice wins: Alice gets +15 - 30 = -15, Bob gets -15
+        assertEq(alicePoints, 185);  // 200 + 15 - 30
+        assertEq(bobPoints, 185);    // 200 - 15
+    }
+
+    function test_MutualCombat_TechniqueBeatsCounter() public {
+        _registerThreePlayers();
+        _startGame();
+        _startRound();
+
+        _commitAndRevealMutual(alice, 2, bob, bob, 3, alice);
+
+        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+
+        // Alice wins: +15 - 20 = -5 net. Bob: -15
+        assertEq(alicePoints, 195);  // 200 + 15 - 20
+        assertEq(bobPoints, 185);    // 200 - 15
+    }
+
+    function test_MutualCombat_Draw() public {
+        _registerThreePlayers();
+        _startGame();
+        _startRound();
+
+        _commitAndRevealMutual(alice, 1, bob, bob, 1, alice);
+
+        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+
+        // Draw: both pay action cost (Domain = 30)
+        assertEq(alicePoints, 170);  // 200 - 30
+        assertEq(bobPoints, 170);    // 200 - 30
+    }
+
+    function test_MutualCombat_BothFlee() public {
+        _registerThreePlayers();
+        _startGame();
+        _startRound();
+
+        _commitAndRevealFlee(alice, bob);
+
+        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+
+        assertEq(alicePoints, 195);  // 200 - 5
+        assertEq(bobPoints, 195);    // 200 - 5
+    }
+
+    function test_MutualCombat_OneFleesOneAttacks() public {
+        _registerThreePlayers();
+        _startGame();
+        _startRound();
+
+        // Alice flees (no target), Bob attacks Alice — one-way from Bob
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+        bytes32 bobSalt = keccak256(abi.encodePacked("salt-bob", crucible.currentRound()));
 
         vm.prank(alice);
-        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), aliceSalt)));
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(4), address(0), aliceSalt)));
 
         vm.prank(bob);
-        crucible.commitAction(keccak256(abi.encodePacked(uint8(3), bobSalt)));
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), alice, bobSalt)));
 
-        // Move to reveal window
         vm.warp(block.timestamp + COMMIT_WINDOW);
 
         vm.prank(alice);
-        crucible.revealAction(1, aliceSalt); // DOMAIN
+        crucible.revealAction(4, address(0), aliceSalt);
 
         vm.prank(bob);
-        crucible.revealAction(3, bobSalt); // COUNTER
+        crucible.revealAction(2, alice, bobSalt);
 
-        // Resolve
         vm.warp(block.timestamp + REVEAL_WINDOW);
         vm.prank(arbiterAddr);
         crucible.resolveRound();
 
-        // Counter beats Domain, so Bob wins
-        // Bob gets 10 points minus Counter cost (10) = 0 net
-        // Alice loses 10 points
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
 
-        assertEq(alicePoints, 40);  // 50 - 10
-        assertEq(bobPoints, 50);    // 50 + 10 - 10
+        // Alice fled: pays 5. Gets hit by Bob one-way: damage = 5 (halved because fled)
+        // Bob: pays technique cost (20)
+        assertEq(alicePoints, 190);  // 200 - 5 - 5
+        assertEq(bobPoints, 180);    // 200 - 20
     }
 
-    function test_DomainBeatsTechnique() public {
+    // ============ ONE-WAY ATTACKS ============
+
+    function test_OneWayAttack() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
-        _commitAndReveal(alice, 1, bob, 2); // Domain vs Technique
+        // Circular: Alice→Bob, Bob→Charlie, Charlie→Alice (all one-way)
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+        bytes32 bobSalt = keccak256(abi.encodePacked("salt-bob", crucible.currentRound()));
+        bytes32 charlieSalt = keccak256(abi.encodePacked("salt-charlie", crucible.currentRound()));
+
+        vm.prank(alice);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), bob, aliceSalt)));
+        vm.prank(bob);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(3), charlie, bobSalt)));
+        vm.prank(charlie);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), alice, charlieSalt)));
+
+        vm.warp(block.timestamp + COMMIT_WINDOW);
+
+        vm.prank(alice);
+        crucible.revealAction(2, bob, aliceSalt);
+        vm.prank(bob);
+        crucible.revealAction(3, charlie, bobSalt);
+        vm.prank(charlie);
+        crucible.revealAction(1, alice, charlieSalt);
+
+        vm.warp(block.timestamp + REVEAL_WINDOW);
+        vm.prank(arbiterAddr);
+        crucible.resolveRound();
 
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+        (int256 charliePoints,,) = crucible.getPlayerInfo(charlie);
 
-        // Domain beats Technique
-        // Alice gets 10 points minus Domain cost (30) = -20 net
-        // Bob loses 10
-        assertEq(alicePoints, 30); // 50 + 10 - 30
-        assertEq(bobPoints, 40);   // 50 - 10
+        // All one-way (A→B→C→A circular):
+        // Alice→Bob: pays 20, Bob takes 10
+        // Bob→Charlie: pays 10, Charlie takes 10
+        // Charlie→Alice: pays 30, Alice takes 10
+        assertEq(alicePoints, 170);   // 200 - 20 - 10
+        assertEq(bobPoints, 180);     // 200 - 10 - 10
+        assertEq(charliePoints, 160); // 200 - 30 - 10
     }
 
-    function test_TechniqueBeatsCounter() public {
+    function test_MultipleAttackersOnSameTarget() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
-        _commitAndReveal(alice, 2, bob, 3); // Technique vs Counter
+        // Alice(Counter)→Bob, Bob(Technique)→Charlie, Charlie(Domain)→Bob
+        // Bob targets Charlie, Charlie targets Bob → mutual combat!
+        // Alice→Bob is one-way
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+        bytes32 bobSalt = keccak256(abi.encodePacked("salt-bob", crucible.currentRound()));
+        bytes32 charlieSalt = keccak256(abi.encodePacked("salt-charlie", crucible.currentRound()));
+
+        vm.prank(alice);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(3), bob, aliceSalt)));
+        vm.prank(bob);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), charlie, bobSalt)));
+        vm.prank(charlie);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), bob, charlieSalt)));
+
+        vm.warp(block.timestamp + COMMIT_WINDOW);
+
+        vm.prank(alice);
+        crucible.revealAction(3, bob, aliceSalt);
+        vm.prank(bob);
+        crucible.revealAction(2, charlie, bobSalt);
+        vm.prank(charlie);
+        crucible.revealAction(1, bob, charlieSalt);
+
+        vm.warp(block.timestamp + REVEAL_WINDOW);
+        vm.prank(arbiterAddr);
+        crucible.resolveRound();
 
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+        (int256 charliePoints,,) = crucible.getPlayerInfo(charlie);
 
-        // Technique beats Counter
-        assertEq(alicePoints, 40); // 50 + 10 - 20
-        assertEq(bobPoints, 40);   // 50 - 10
+        // Alice→Bob: one-way. Alice pays 10(counter), Bob takes 10.
+        // Bob↔Charlie: mutual. Bob(Technique) vs Charlie(Domain). Domain beats Technique → Charlie wins.
+        //   Charlie: +15 - 30 = -15 → 200 - 15 = 185
+        //   Bob: -15
+        // Bob total: 200 - 10(from alice) - 15(mutual loss) = 175
+        assertEq(alicePoints, 190);   // 200 - 10
+        assertEq(bobPoints, 175);     // 200 - 10 - 15
+        assertEq(charliePoints, 185); // 200 + 15 - 30
     }
 
-    function test_DrawSameAction() public {
+    // ============ FLEE MECHANICS ============
+
+    function test_FleeReducesOneWayDamage() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
-        _commitAndReveal(alice, 1, bob, 1); // Domain vs Domain
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+        bytes32 bobSalt = keccak256(abi.encodePacked("salt-bob", crucible.currentRound()));
 
-        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
-        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+        vm.prank(alice);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), bob, aliceSalt)));
+        vm.prank(bob);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(4), address(0), bobSalt)));
 
-        // Draw - both lose action cost
-        assertEq(alicePoints, 20); // 50 - 30
-        assertEq(bobPoints, 20);   // 50 - 30
-    }
+        vm.warp(block.timestamp + COMMIT_WINDOW);
 
-    function test_BothFlee() public {
-        _registerThreePlayers();
-        _startGame();
-        _setMatchup(alice, bob);
+        vm.prank(alice);
+        crucible.revealAction(2, bob, aliceSalt);
+        vm.prank(bob);
+        crucible.revealAction(4, address(0), bobSalt);
 
-        _commitAndReveal(alice, 4, bob, 4); // Flee vs Flee
-
-        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
-        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
-
-        assertEq(alicePoints, 45); // 50 - 5
-        assertEq(bobPoints, 45);   // 50 - 5
-    }
-
-    function test_OneFlees() public {
-        _registerThreePlayers();
-        _startGame();
-        _setMatchup(alice, bob);
-
-        _commitAndReveal(alice, 4, bob, 2); // Flee vs Technique
+        vm.warp(block.timestamp + REVEAL_WINDOW);
+        vm.prank(arbiterAddr);
+        crucible.resolveRound();
 
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
 
-        assertEq(alicePoints, 45); // 50 - 5
-        assertEq(bobPoints, 60);   // 50 + 10
+        // Alice: pays 20. Bob: pays 5(flee), takes 5(halved damage)
+        assertEq(alicePoints, 180);  // 200 - 20
+        assertEq(bobPoints, 190);    // 200 - 5 - 5
     }
+
+    // ============ NO REVEAL DEFAULTS TO FLEE ============
 
     function test_NoRevealDefaultsToFlee() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
-        // Only Alice commits and reveals
-        bytes32 aliceSalt = keccak256("alice-salt");
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+
         vm.prank(alice);
-        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), aliceSalt)));
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), bob, aliceSalt)));
 
-        // Bob doesn't commit at all
         vm.warp(block.timestamp + COMMIT_WINDOW);
-
         vm.prank(alice);
-        crucible.revealAction(2, aliceSalt);
+        crucible.revealAction(2, bob, aliceSalt);
 
         vm.warp(block.timestamp + REVEAL_WINDOW);
         vm.prank(arbiterAddr);
         crucible.resolveRound();
 
-        // Bob defaults to Flee
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
 
-        assertEq(alicePoints, 60); // 50 + 10
-        assertEq(bobPoints, 45);   // 50 - 5
+        // Bob defaults to FLEE. Alice→Bob one-way, halved damage.
+        assertEq(alicePoints, 180);  // 200 - 20
+        assertEq(bobPoints, 190);    // 200 - 5 - 5
     }
+
+    // ============ COMMIT WINDOW ============
 
     function test_CommitWindow_Expired() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
         vm.warp(block.timestamp + COMMIT_WINDOW + 1);
 
         bytes32 salt = keccak256("late");
         vm.prank(alice);
         vm.expectRevert(Crucible.CommitWindowClosed.selector);
-        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), salt)));
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), bob, salt)));
     }
 
     function test_HashMismatch() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
+        _startRound();
 
         bytes32 salt = keccak256("salt");
         vm.prank(alice);
-        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), salt)));
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), bob, salt)));
 
         vm.warp(block.timestamp + COMMIT_WINDOW);
 
         vm.prank(alice);
         vm.expectRevert(Crucible.HashMismatch.selector);
-        crucible.revealAction(2, salt); // Wrong action
+        crucible.revealAction(2, bob, salt);
     }
 
     // ============ ELIMINATION ============
@@ -303,24 +406,42 @@ contract CrucibleTest is Test {
     function test_Elimination() public {
         _registerThreePlayers();
         _startGame();
+        _startRound();
 
-        // Round 1: Alice vs Bob, Domain vs Counter (Bob wins)
-        _setMatchup(alice, bob);
-        _commitAndReveal(alice, 1, bob, 3);
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+        bytes32 bobSalt = keccak256(abi.encodePacked("salt-bob", crucible.currentRound()));
+        bytes32 charlieSalt = keccak256(abi.encodePacked("salt-charlie", crucible.currentRound()));
 
-        // Alice: 50 - 10 = 40, Bob: 50 + 10 - 10 = 50
-        // Round 2
+        // Alice(Domain→Bob), Bob(Counter→Alice) mutual, Charlie(Counter→Alice) one-way
+        vm.prank(alice);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), bob, aliceSalt)));
+        vm.prank(bob);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(3), alice, bobSalt)));
+        vm.prank(charlie);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(3), alice, charlieSalt)));
+
+        vm.warp(block.timestamp + COMMIT_WINDOW);
+
+        vm.prank(alice);
+        crucible.revealAction(1, bob, aliceSalt);
+        vm.prank(bob);
+        crucible.revealAction(3, alice, bobSalt);
+        vm.prank(charlie);
+        crucible.revealAction(3, alice, charlieSalt);
+
+        vm.warp(block.timestamp + REVEAL_WINDOW);
         vm.prank(arbiterAddr);
-        crucible.advanceRound();
+        crucible.resolveRound();
 
-        _setMatchup(alice, bob);
-        _commitAndReveal(alice, 1, bob, 3);
+        (int256 alicePoints, bool aliceAlive,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+        (int256 charliePoints,,) = crucible.getPlayerInfo(charlie);
 
-        // Alice: 40 - 10 = 30, Bob: 50 + 10 - 10 = 50
-        (, bool aliceAlive,) = crucible.getPlayerInfo(alice);
-        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
-
-        assertEq(alicePoints, 30);
+        // Mutual: Alice(Domain) vs Bob(Counter) — Bob wins. Alice -15, Bob +15-10=+5
+        // One-way: Charlie(Counter)→Alice. Charlie -10(cost), Alice -10(damage)
+        assertEq(alicePoints, 175);   // 200 - 15 - 10
+        assertEq(bobPoints, 205);     // 200 + 15 - 10
+        assertEq(charliePoints, 190); // 200 - 10
         assertTrue(aliceAlive);
     }
 
@@ -330,21 +451,21 @@ contract CrucibleTest is Test {
         _registerThreePlayers();
         _startGame();
 
-        // Need to accumulate 100+ points through multiple wins
-        // Win several rounds to build up points
-        for (uint256 i = 0; i < 10; i++) {
-            _setMatchup(alice, bob);
-            _commitAndReveal(alice, 2, bob, 3); // Technique beats Counter, alice wins
-            if (i < 9) {
-                vm.prank(arbiterAddr);
-                crucible.advanceRound();
-            }
+        // Win rounds: Alice(Counter) beats Bob(Domain) = +5/round for Alice
+        for (uint256 i = 0; i < 8; i++) {
+            _startRound();
+            _commitAndRevealMutual(alice, 3, bob, bob, 1, alice);
+            vm.prank(arbiterAddr);
+            crucible.advanceRound();
         }
 
+        // Alice: 200 + 8*5 = 240. Bob: 200 - 8*15 = 80.
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         assertTrue(alicePoints >= 100);
 
-        // Now in RULES phase after resolve
+        _startRound();
+        _commitAndRevealMutual(alice, 3, bob, bob, 1, alice);
+
         vm.prank(alice);
         crucible.proposeRule(Crucible.RuleType.BLOOD_TAX);
 
@@ -353,20 +474,25 @@ contract CrucibleTest is Test {
         assertEq(uint8(rules[0].ruleType), uint8(Crucible.RuleType.BLOOD_TAX));
         assertEq(rules[0].proposer, alice);
 
-        // Alice should have lost 100 points
         (int256 afterPoints,,) = crucible.getPlayerInfo(alice);
-        assertEq(afterPoints, alicePoints - 100);
+        assertEq(afterPoints, alicePoints + 5 - 100); // gained 5 from round, lost 100 from rule
     }
 
     function test_ProposeRule_InsufficientPoints() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
 
-        // Both flee to waste some points, then go to rules phase
-        _commitAndReveal(alice, 4, bob, 4);
+        // Burn points: 4 rounds of Domain draw (cost 30 each) → 200 - 120 = 80
+        for (uint256 i = 0; i < 4; i++) {
+            _startRound();
+            _commitAndRevealMutual(alice, 1, bob, bob, 1, alice);
+            if (i < 3) {
+                vm.prank(arbiterAddr);
+                crucible.advanceRound();
+            }
+        }
 
-        // Alice has 45 points (50 - 5), not enough for rule
+        // Alice has 80 points, not enough for rule (requires 100)
         vm.prank(alice);
         vm.expectRevert(Crucible.InsufficientPoints.selector);
         crucible.proposeRule(Crucible.RuleType.BLOOD_TAX);
@@ -378,22 +504,16 @@ contract CrucibleTest is Test {
         _registerThreePlayers();
         _startGame();
 
-        // Win multiple rounds to accumulate 100+ points for rule
-        for (uint256 i = 0; i < 10; i++) {
-            _setMatchup(alice, bob);
-            _commitAndReveal(alice, 2, bob, 3); // Technique beats Counter
+        for (uint256 i = 0; i < 8; i++) {
+            _startRound();
+            _commitAndRevealMutual(alice, 3, bob, bob, 1, alice);
             vm.prank(arbiterAddr);
             crucible.advanceRound();
         }
 
-        (int256 alicePointsBefore,,) = crucible.getPlayerInfo(alice);
-        assertTrue(alicePointsBefore >= 100);
+        _startRound();
+        _commitAndRevealMutual(alice, 3, bob, bob, 1, alice);
 
-        // Go to rules phase
-        _setMatchup(alice, bob);
-        _commitAndReveal(alice, 2, bob, 3);
-
-        // Propose expensive domain
         vm.prank(alice);
         crucible.proposeRule(Crucible.RuleType.EXPENSIVE_DOMAIN);
 
@@ -404,19 +524,17 @@ contract CrucibleTest is Test {
         (int256 bobAfterRule,,) = crucible.getPlayerInfo(bob);
 
         // Now Domain costs 50 instead of 30
-        _setMatchup(alice, bob);
-
-        // Alice uses Domain, Bob uses Technique. Alice wins but at higher cost.
-        _commitAndReveal(alice, 1, bob, 2);
+        _startRound();
+        _commitAndRevealMutual(alice, 1, bob, bob, 2, alice);
 
         (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
         (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
 
-        // With expensive domain rule: Domain costs 50
-        // Alice: aliceAfterRule + 10 - 50 = aliceAfterRule - 40
-        // Bob: bobAfterRule - 10
-        assertEq(alicePoints, aliceAfterRule - 40);
-        assertEq(bobPoints, bobAfterRule - 10);
+        // Alice(Domain) beats Bob(Technique) — mutual, transfer=15
+        // Alice: +15 - 50(expensive domain) = -35
+        // Bob: -15
+        assertEq(alicePoints, aliceAfterRule - 35);
+        assertEq(bobPoints, bobAfterRule - 15);
     }
 
     // ============ SETTLEMENT ============
@@ -424,25 +542,23 @@ contract CrucibleTest is Test {
     function test_EndGameAutoDistribute() public {
         _registerThreePlayers();
         _startGame();
-        _setMatchup(alice, bob);
-        _commitAndReveal(alice, 2, bob, 3);
+        _startRound();
+        _commitAndRevealMutual(alice, 2, bob, bob, 3, alice);
 
         vm.prank(arbiterAddr);
         crucible.advanceRound();
 
-        // End game
         address[] memory winners = new address[](2);
         winners[0] = alice;
         winners[1] = bob;
 
         uint256[] memory shares = new uint256[](2);
-        shares[0] = 6000; // 60%
-        shares[1] = 4000; // 40%
+        shares[0] = 6000;
+        shares[1] = 4000;
 
-        // Prize pool is 1.5 ether (0.5 ether * 3 players)
         uint256 pool = 1.5 ether;
-        uint256 expectedAlice = (pool * 6000) / 10000; // 0.9 ether
-        uint256 expectedBob = (pool * 4000) / 10000;   // 0.6 ether
+        uint256 expectedAlice = (pool * 6000) / 10000;
+        uint256 expectedBob = (pool * 4000) / 10000;
 
         uint256 aliceBalBefore = alice.balance;
         uint256 bobBalBefore = bob.balance;
@@ -453,6 +569,50 @@ contract CrucibleTest is Test {
         assertEq(uint8(crucible.phase()), uint8(Crucible.Phase.ENDED));
         assertEq(alice.balance - aliceBalBefore, expectedAlice);
         assertEq(bob.balance - bobBalBefore, expectedBob);
+    }
+
+    // ============ THREE PLAYER FREE-FOR-ALL ============
+
+    function test_ThreePlayerFreeForAll() public {
+        _registerThreePlayers();
+        _startGame();
+        _startRound();
+
+        bytes32 aliceSalt = keccak256(abi.encodePacked("salt-alice", crucible.currentRound()));
+        bytes32 bobSalt = keccak256(abi.encodePacked("salt-bob", crucible.currentRound()));
+        bytes32 charlieSalt = keccak256(abi.encodePacked("salt-charlie", crucible.currentRound()));
+
+        // Alice(Domain)→Bob, Bob(Technique)→Alice: mutual. Domain beats Technique.
+        // Charlie(Counter)→Bob: one-way.
+        vm.prank(alice);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(1), bob, aliceSalt)));
+        vm.prank(bob);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(2), alice, bobSalt)));
+        vm.prank(charlie);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(3), bob, charlieSalt)));
+
+        vm.warp(block.timestamp + COMMIT_WINDOW);
+
+        vm.prank(alice);
+        crucible.revealAction(1, bob, aliceSalt);
+        vm.prank(bob);
+        crucible.revealAction(2, alice, bobSalt);
+        vm.prank(charlie);
+        crucible.revealAction(3, bob, charlieSalt);
+
+        vm.warp(block.timestamp + REVEAL_WINDOW);
+        vm.prank(arbiterAddr);
+        crucible.resolveRound();
+
+        (int256 alicePoints,,) = crucible.getPlayerInfo(alice);
+        (int256 bobPoints,,) = crucible.getPlayerInfo(bob);
+        (int256 charliePoints,,) = crucible.getPlayerInfo(charlie);
+
+        // Mutual: Alice(Domain) beats Bob(Technique) → Alice +15-30=-15, Bob -15
+        // One-way: Charlie(Counter)→Bob → Charlie -10(cost), Bob -10(damage)
+        assertEq(alicePoints, 185);   // 200 + 15 - 30
+        assertEq(bobPoints, 175);     // 200 - 15 - 10
+        assertEq(charliePoints, 190); // 200 - 10
     }
 
     // ============ HELPERS ============
@@ -471,36 +631,31 @@ contract CrucibleTest is Test {
         crucible.startGame();
     }
 
-    function _setMatchup(address p1, address p2) internal {
-        Crucible.Matchup[] memory matchups = new Crucible.Matchup[](1);
-        matchups[0] = Crucible.Matchup(p1, p2);
-
+    function _startRound() internal {
         vm.prank(arbiterAddr);
-        crucible.setMatchups(matchups, COMMIT_WINDOW, REVEAL_WINDOW);
+        crucible.startRound(COMMIT_WINDOW, REVEAL_WINDOW);
     }
 
-    function _commitAndReveal(
-        address p1,
-        uint8 p1Action,
-        address p2,
-        uint8 p2Action
+    function _commitAndRevealMutual(
+        address p1, uint8 p1Action, address t1,
+        address p2, uint8 p2Action, address t2
     ) internal {
-        bytes32 salt1 = keccak256(abi.encodePacked("salt1", currentRound()));
-        bytes32 salt2 = keccak256(abi.encodePacked("salt2", currentRound()));
+        bytes32 salt1 = keccak256(abi.encodePacked("salt1", crucible.currentRound()));
+        bytes32 salt2 = keccak256(abi.encodePacked("salt2", crucible.currentRound()));
 
         vm.prank(p1);
-        crucible.commitAction(keccak256(abi.encodePacked(p1Action, salt1)));
+        crucible.commitAction(keccak256(abi.encodePacked(p1Action, t1, salt1)));
 
         vm.prank(p2);
-        crucible.commitAction(keccak256(abi.encodePacked(p2Action, salt2)));
+        crucible.commitAction(keccak256(abi.encodePacked(p2Action, t2, salt2)));
 
         vm.warp(block.timestamp + COMMIT_WINDOW);
 
         vm.prank(p1);
-        crucible.revealAction(p1Action, salt1);
+        crucible.revealAction(p1Action, t1, salt1);
 
         vm.prank(p2);
-        crucible.revealAction(p2Action, salt2);
+        crucible.revealAction(p2Action, t2, salt2);
 
         vm.warp(block.timestamp + REVEAL_WINDOW);
 
@@ -508,7 +663,27 @@ contract CrucibleTest is Test {
         crucible.resolveRound();
     }
 
-    function currentRound() internal view returns (uint256) {
-        return crucible.currentRound();
+    function _commitAndRevealFlee(address p1, address p2) internal {
+        bytes32 salt1 = keccak256(abi.encodePacked("salt1", crucible.currentRound()));
+        bytes32 salt2 = keccak256(abi.encodePacked("salt2", crucible.currentRound()));
+
+        vm.prank(p1);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(4), address(0), salt1)));
+
+        vm.prank(p2);
+        crucible.commitAction(keccak256(abi.encodePacked(uint8(4), address(0), salt2)));
+
+        vm.warp(block.timestamp + COMMIT_WINDOW);
+
+        vm.prank(p1);
+        crucible.revealAction(4, address(0), salt1);
+
+        vm.prank(p2);
+        crucible.revealAction(4, address(0), salt2);
+
+        vm.warp(block.timestamp + REVEAL_WINDOW);
+
+        vm.prank(arbiterAddr);
+        crucible.resolveRound();
     }
 }

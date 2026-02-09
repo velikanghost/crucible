@@ -27,8 +27,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`Broadcast: ${event}`);
   }
 
-  emitRoundStart(round: number, matchups: unknown[], commitDeadline: number) {
-    this.broadcast('round:start', { round, matchups, commitDeadline });
+  emitRoundStart(round: number, commitDeadline: number) {
+    this.broadcast('round:start', { round, commitDeadline });
   }
 
   emitRevealPhase(revealDeadline: number) {

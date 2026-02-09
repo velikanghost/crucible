@@ -16,16 +16,8 @@ export const CRUCIBLE_ABI = [
   },
   {
     type: 'function',
-    name: 'setMatchups',
+    name: 'startRound',
     inputs: [
-      {
-        name: '_matchups',
-        type: 'tuple[]',
-        components: [
-          { name: 'player1', type: 'address' },
-          { name: 'player2', type: 'address' },
-        ],
-      },
       { name: '_commitWindow', type: 'uint256' },
       { name: '_revealWindow', type: 'uint256' },
     ],
@@ -137,21 +129,6 @@ export const CRUCIBLE_ABI = [
   },
   {
     type: 'function',
-    name: 'getCurrentMatchups',
-    inputs: [],
-    outputs: [
-      {
-        type: 'tuple[]',
-        components: [
-          { name: 'player1', type: 'address' },
-          { name: 'player2', type: 'address' },
-        ],
-      },
-    ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
     name: 'getPlayerInfo',
     inputs: [{ name: '_player', type: 'address' }],
     outputs: [
@@ -172,6 +149,7 @@ export const CRUCIBLE_ABI = [
       { name: 'committed', type: 'bool' },
       { name: 'revealed', type: 'bool' },
       { name: 'action', type: 'uint8' },
+      { name: 'target', type: 'address' },
     ],
     stateMutability: 'view',
   },
@@ -190,7 +168,7 @@ export const CRUCIBLE_ABI = [
   },
   {
     type: 'event',
-    name: 'MatchupsSet',
+    name: 'RoundStarted',
     inputs: [
       { name: 'round', type: 'uint256', indexed: true },
       { name: 'commitDeadline', type: 'uint256', indexed: false },
@@ -212,6 +190,7 @@ export const CRUCIBLE_ABI = [
       { name: 'round', type: 'uint256', indexed: true },
       { name: 'player', type: 'address', indexed: true },
       { name: 'action', type: 'uint8', indexed: false },
+      { name: 'target', type: 'address', indexed: false },
     ],
   },
   {

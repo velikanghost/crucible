@@ -28,11 +28,6 @@ export interface PlayerState {
   readonly alive: boolean;
 }
 
-export interface Matchup {
-  readonly player1: string;
-  readonly player2: string;
-}
-
 export interface CombatResult {
   readonly player1: string;
   readonly player2: string;
@@ -52,7 +47,6 @@ export interface GameState {
   readonly phase: Phase;
   readonly round: number;
   readonly players: readonly PlayerState[];
-  readonly matchups: readonly Matchup[];
   readonly activeRules: readonly ActiveRule[];
   readonly prizePool: string;
   readonly commitDeadline: number;

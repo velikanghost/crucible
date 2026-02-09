@@ -12,7 +12,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { GAME_CONFIG } from '../common/config';
 import { CRUCIBLE_ABI } from './crucible.abi';
-import type { Matchup, PlayerState, ActiveRule, CombatResult } from '../common/types';
+import type { PlayerState, ActiveRule, CombatResult } from '../common/types';
 
 const monadTestnet = defineChain({
   id: 10143,
@@ -77,23 +77,17 @@ export class ChainService implements OnModuleInit {
     return hash;
   }
 
-  async setMatchups(matchups: readonly Matchup[]): Promise<Hash> {
-    const formatted = matchups.map((m) => ({
-      player1: m.player1 as Address,
-      player2: m.player2 as Address,
-    }));
-
+  async startRound(): Promise<Hash> {
     const hash = await this.writeContract({
       address: this.contractAddress,
       abi: CRUCIBLE_ABI,
-      functionName: 'setMatchups',
+      functionName: 'startRound',
       args: [
-        formatted,
         BigInt(GAME_CONFIG.commitWindow),
         BigInt(GAME_CONFIG.revealWindow),
       ],
     });
-    this.logger.log(`setMatchups tx: ${hash}`);
+    this.logger.log(`startRound tx: ${hash}`);
     return hash;
   }
 
@@ -160,6 +154,16 @@ export class ChainService implements OnModuleInit {
       ],
     });
     this.logger.log(`endGame tx: ${hash}`);
+    return hash;
+  }
+
+  async newGame(): Promise<Hash> {
+    const hash = await this.writeContract({
+      address: this.contractAddress,
+      abi: CRUCIBLE_ABI,
+      functionName: 'newGame',
+    });
+    this.logger.log(`newGame tx: ${hash}`);
     return hash;
   }
 
