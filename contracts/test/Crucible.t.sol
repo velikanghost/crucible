@@ -421,7 +421,7 @@ contract CrucibleTest is Test {
 
     // ============ SETTLEMENT ============
 
-    function test_EndGameAndClaim() public {
+    function test_EndGameAutoDistribute() public {
         _registerThreePlayers();
         _startGame();
         _setMatchup(alice, bob);
@@ -439,48 +439,20 @@ contract CrucibleTest is Test {
         shares[0] = 6000; // 60%
         shares[1] = 4000; // 40%
 
+        // Prize pool is 1.5 ether (0.5 ether * 3 players)
+        uint256 pool = 1.5 ether;
+        uint256 expectedAlice = (pool * 6000) / 10000; // 0.9 ether
+        uint256 expectedBob = (pool * 4000) / 10000;   // 0.6 ether
+
+        uint256 aliceBalBefore = alice.balance;
+        uint256 bobBalBefore = bob.balance;
+
         vm.prank(arbiterAddr);
         crucible.endGame(winners, shares);
 
         assertEq(uint8(crucible.phase()), uint8(Crucible.Phase.ENDED));
-
-        // Prize pool is 1.5 ether (0.5 ether * 3 players)
-        uint256 prizePool = 1.5 ether;
-
-        // Alice claims
-        uint256 expectedAlice = (prizePool * 6000) / 10000; // 0.9 ether
-        uint256 aliceBalBefore = alice.balance;
-
-        vm.prank(alice);
-        crucible.claimRewards();
-
         assertEq(alice.balance - aliceBalBefore, expectedAlice);
-
-        // Bob claims
-        uint256 expectedBob = (prizePool * 4000) / 10000; // 0.6 ether
-        uint256 bobBalBefore = bob.balance;
-
-        vm.prank(bob);
-        crucible.claimRewards();
-
         assertEq(bob.balance - bobBalBefore, expectedBob);
-    }
-
-    function test_ClaimRewards_NoPayout() public {
-        _registerThreePlayers();
-        _startGame();
-
-        address[] memory winners = new address[](1);
-        winners[0] = alice;
-        uint256[] memory shares = new uint256[](1);
-        shares[0] = 10000;
-
-        vm.prank(arbiterAddr);
-        crucible.endGame(winners, shares);
-
-        vm.prank(charlie);
-        vm.expectRevert(Crucible.NoPayout.selector);
-        crucible.claimRewards();
     }
 
     // ============ HELPERS ============

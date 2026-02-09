@@ -50,7 +50,7 @@ The agent will:
 | --------------- | ------------------------------------------ |
 | Entry Fee       | 0.5 MON                                    |
 | Starting Points | 50                                         |
-| Contract        | 0x764A562328697711B7ED62d864cC06c873c9f26A |
+| Contract        | 0x2876D865E473ab4c7aFa9BB5EB04b4D1743baa23 |
 | Chain           | Monad Testnet (10143)                      |
 | Arbiter         | https://crucible.arbiter.monad.xyz         |
 

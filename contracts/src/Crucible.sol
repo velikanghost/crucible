@@ -83,7 +83,6 @@ contract Crucible {
     Rule[] public activeRules;
 
     uint256 public prizePool;
-    mapping(address => uint256) public pendingPayouts;
 
     // ============ EVENTS ============
 
@@ -106,6 +105,7 @@ contract Crucible {
     event RoundAdvanced(uint256 indexed round);
     event GameEnded(uint256 totalRounds);
     event PayoutClaimed(address indexed player, uint256 amount);
+    event NewGame();
 
     // ============ ERRORS ============
 
@@ -123,7 +123,6 @@ contract Crucible {
     error RevealNotOver();
     error InsufficientPoints();
     error NeedMorePlayers();
-    error NoPayout();
     error TransferFailed();
     error SharesExceedTotal();
     error LengthMismatch();
@@ -283,22 +282,39 @@ contract Crucible {
         if (totalShares > 10000) revert SharesExceedTotal();
 
         for (uint256 i = 0; i < _winners.length; i++) {
-            pendingPayouts[_winners[i]] = (prizePool * _shares[i]) / 10000;
+            uint256 payout = (prizePool * _shares[i]) / 10000;
+            if (payout > 0) {
+                (bool sent,) = _winners[i].call{value: payout}("");
+                if (!sent) revert TransferFailed();
+                emit PayoutClaimed(_winners[i], payout);
+            }
         }
 
         phase = Phase.ENDED;
         emit GameEnded(currentRound);
     }
 
-    function claimRewards() external inPhase(Phase.ENDED) {
-        uint256 payout = pendingPayouts[msg.sender];
-        if (payout == 0) revert NoPayout();
+    // ============ NEW GAME ============
 
-        pendingPayouts[msg.sender] = 0;
-        (bool sent,) = msg.sender.call{value: payout}("");
-        if (!sent) revert TransferFailed();
+    function newGame() external onlyArbiter inPhase(Phase.ENDED) {
+        // Clear player registrations
+        for (uint256 i = 0; i < playerList.length; i++) {
+            delete players[playerList[i]];
+        }
+        delete playerList;
 
-        emit PayoutClaimed(msg.sender, payout);
+        // Clear matchups and rules
+        delete currentMatchups;
+        delete activeRules;
+
+        // Reset game state
+        currentRound = 0;
+        commitDeadline = 0;
+        revealDeadline = 0;
+        prizePool = 0;
+        phase = Phase.LOBBY;
+
+        emit NewGame();
     }
 
     // ============ VIEW FUNCTIONS ============

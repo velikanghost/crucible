@@ -4,6 +4,8 @@ export const GAME_CONFIG = {
   ruleWindow: 20,
   minPlayers: 2,
   maxRounds: 20,
+  platformFeeBps: 200,
+  platformFeeAddress: process.env.PLATFORM_FEE_ADDRESS ?? '',
 } as const;
 
 export const CHAIN_CONFIG = {

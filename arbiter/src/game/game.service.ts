@@ -256,31 +256,40 @@ export class GameService {
     const playerStates = await this.chainService.getAllPlayerInfo(alivePlayers);
 
     const sorted = [...playerStates].sort((a, b) => b.points - a.points);
-    const totalPoints = sorted.reduce((sum, p) => sum + Math.max(0, p.points), 0);
 
-    const winners: string[] = [];
-    const shares: number[] = [];
-
-    for (const player of sorted) {
-      if (player.points > 0) {
-        winners.push(player.address);
-        shares.push(Math.floor((Math.max(0, player.points) / totalPoints) * 10000));
-      }
+    const winner = sorted[0];
+    if (!winner) {
+      this.logger.warn('No alive players to distribute prizes to');
+      return;
     }
 
-    if (winners.length > 0) {
-      await this.chainService.endGame(winners, shares);
-    }
+    const { platformFeeAddress, platformFeeBps } = GAME_CONFIG;
+    const hasFeeAddress = platformFeeAddress.length > 0;
+
+    const winnerShareBps = hasFeeAddress ? 10000 - platformFeeBps : 10000;
+
+    const winners: string[] = hasFeeAddress
+      ? [winner.address, platformFeeAddress]
+      : [winner.address];
+    const shares: number[] = hasFeeAddress
+      ? [winnerShareBps, platformFeeBps]
+      : [winnerShareBps];
+
+    await this.chainService.endGame(winners, shares);
 
     this.gateway.emitGameOver(
       sorted.map((p) => ({ address: p.address, points: p.points })),
       winners.map((w, i) => ({ address: w, shareBps: shares[i] })),
     );
 
-    this.logger.log('Game ended. Final standings:');
+    this.logger.log('Game ended (winner-takes-all). Final standings:');
     sorted.forEach((p, i) => {
       this.logger.log(`  ${i + 1}. ${p.address}: ${p.points} pts`);
     });
+    this.logger.log(`Winner: ${winner.address} (${winnerShareBps} bps)`);
+    if (hasFeeAddress) {
+      this.logger.log(`Platform fee: ${platformFeeAddress} (${platformFeeBps} bps)`);
+    }
   }
 
   private getOpponentHistory(address: string): number[] {

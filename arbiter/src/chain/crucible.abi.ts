@@ -58,6 +58,13 @@ export const CRUCIBLE_ABI = [
   },
   {
     type: 'function',
+    name: 'newGame',
+    inputs: [],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'phase',
     inputs: [],
     outputs: [{ type: 'uint8' }],
@@ -253,5 +260,10 @@ export const CRUCIBLE_ABI = [
       { name: 'player', type: 'address', indexed: true },
       { name: 'amount', type: 'uint256', indexed: false },
     ],
+  },
+  {
+    type: 'event',
+    name: 'NewGame',
+    inputs: [],
   },
 ] as const;
