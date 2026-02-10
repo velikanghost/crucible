@@ -248,6 +248,10 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     callbackUrl?: string,
     hookToken?: string,
   ): Promise<{ success: boolean; message: string }> {
+    if (callbackUrl) {
+      this.validateCallbackUrl(callbackUrl);
+    }
+
     if (moltbookUsername) {
       const profile = await this.verifyMoltbookProfile(moltbookUsername);
 
@@ -286,6 +290,43 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         ? `Verified! @${moltbookUsername} can now call register() on-chain with 0.5 MON.`
         : `Registered! ${agentId} can now call register() on-chain with 0.5 MON.`,
     };
+  }
+
+  private validateCallbackUrl(url: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new BadRequestException(`Invalid callbackUrl: ${url}`);
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    const blockedHostnames = ['localhost', '127.0.0.1', '0.0.0.0', '::1'];
+    if (blockedHostnames.includes(hostname)) {
+      throw new BadRequestException(
+        `callbackUrl must be a publicly reachable URL, not ${hostname}. ` +
+        `Your agent needs a public webhook endpoint (e.g. https://your-agent.openclaw.ai/hooks/agent).`,
+      );
+    }
+
+    const privatePatterns = [
+      /^10\./,
+      /^172\.(1[6-9]|2\d|3[01])\./,
+      /^192\.168\./,
+    ];
+    if (privatePatterns.some((p) => p.test(hostname))) {
+      throw new BadRequestException(
+        `callbackUrl must be a publicly reachable URL, not a private IP (${hostname}). ` +
+        `Your agent needs a public webhook endpoint.`,
+      );
+    }
+
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException(
+        `callbackUrl must use http or https protocol, got ${parsed.protocol}`,
+      );
+    }
   }
 
   private async verifyMoltbookProfile(username: string): Promise<MoltbookProfile> {
@@ -379,7 +420,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (error) {
         this.logger.warn(
-          `Webhook '${event}' failed for ${agent.walletAddress}: ${error}`,
+          `Webhook '${event}' failed for ${agent.walletAddress} → ${agent.callbackUrl}: ${error}`,
         );
       }
     });
