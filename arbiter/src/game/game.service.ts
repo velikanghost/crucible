@@ -117,59 +117,41 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     await this.checkAutoStart();
   }
 
+  async resetGame(): Promise<void> {
+    this.logger.log('Admin reset requested. Resetting game to clean LOBBY...');
+
+    if (this.autoStartTimer) {
+      clearTimeout(this.autoStartTimer);
+      this.autoStartTimer = null;
+    }
+
+    await this.resetContractToLobby();
+
+    this.phase = Phase.LOBBY;
+    this.round = 0;
+    this.commitDeadline = 0;
+    this.revealDeadline = 0;
+    this.registeredAgents.clear();
+    this.roundHistory = [];
+    this.running = false;
+
+    this.logger.log('Game reset complete. Clean LOBBY ready for new players.');
+  }
+
   private async recoverFromStaleState(): Promise<void> {
     this.logger.log('Checking contract state on startup...');
 
     try {
-      let onChainPhase = await this.chainService.getPhase();
-      const phaseName = ['LOBBY', 'COMMIT', 'REVEAL', 'RULES', 'ENDED'][onChainPhase] ?? `UNKNOWN(${onChainPhase})`;
-
+      const onChainPhase = await this.chainService.getPhase();
       if (onChainPhase === ON_CHAIN_PHASE.LOBBY) {
         const playerCount = await this.chainService.getPlayerCount();
         if (playerCount === 0) {
           this.logger.log('Contract is in clean LOBBY state. Ready for new game.');
           return;
         }
-
-        this.logger.log(`Contract in LOBBY with ${playerCount} leftover players. Running cleanup cycle...`);
-        await this.chainService.startGame();
-        await this.chainService.startRound(1, 1);
-        const revealDeadline = await this.chainService.getRevealDeadline();
-        const waitMs = Math.max(0, (revealDeadline - Math.floor(Date.now() / 1000) + 2) * 1000);
-        if (waitMs > 0) {
-          this.logger.log(`Waiting ${Math.ceil(waitMs / 1000)}s for reveal deadline...`);
-          await this.sleep(waitMs);
-        }
-        await this.chainService.resolveRound();
-        onChainPhase = ON_CHAIN_PHASE.RULES;
       }
 
-      if (onChainPhase !== ON_CHAIN_PHASE.LOBBY) {
-        this.logger.log(`Contract stuck in ${phaseName} phase. Resetting to LOBBY...`);
-      }
-
-      if (onChainPhase === ON_CHAIN_PHASE.COMMIT || onChainPhase === ON_CHAIN_PHASE.REVEAL) {
-        const revealDeadline = await this.chainService.getRevealDeadline();
-        const waitMs = Math.max(0, (revealDeadline - Math.floor(Date.now() / 1000) + 2) * 1000);
-        if (waitMs > 0) {
-          this.logger.log(`Waiting ${Math.ceil(waitMs / 1000)}s for reveal deadline...`);
-          await this.sleep(waitMs);
-        }
-        await this.chainService.resolveRound();
-        onChainPhase = ON_CHAIN_PHASE.RULES;
-      }
-
-      if (onChainPhase === ON_CHAIN_PHASE.RULES) {
-        const alivePlayers = await this.chainService.getAlivePlayers();
-        const winners = alivePlayers.length > 0 ? [alivePlayers[0]] : [];
-        const shares = winners.length > 0 ? [10000] : [];
-        await this.chainService.endGame(winners, shares);
-        onChainPhase = ON_CHAIN_PHASE.ENDED;
-      }
-
-      if (onChainPhase === ON_CHAIN_PHASE.ENDED) {
-        await this.chainService.newGame();
-      }
+      await this.resetContractToLobby();
 
       this.phase = Phase.LOBBY;
       this.round = 0;
@@ -184,6 +166,43 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Arbiter may not function correctly until contract is manually reset.');
     }
   }
+
+  private async resetContractToLobby(): Promise<void> {
+    let onChainPhase = await this.chainService.getPhase();
+    const phaseName = ['LOBBY', 'COMMIT', 'REVEAL', 'RULES', 'ENDED'][onChainPhase] ?? `UNKNOWN(${onChainPhase})`;
+    this.logger.log(`Contract in ${phaseName} phase. Cycling to LOBBY...`);
+
+    if (onChainPhase === ON_CHAIN_PHASE.LOBBY) {
+      const playerCount = await this.chainService.getPlayerCount();
+      if (playerCount === 0) return;
+
+      this.logger.log(`LOBBY with ${playerCount} leftover players. Running cleanup cycle...`);
+      await this.chainService.startGame();
+      await this.chainService.startRound(1, 1);
+      await this.waitForRevealDeadline();
+      await this.chainService.resolveRound();
+      onChainPhase = ON_CHAIN_PHASE.RULES;
+    }
+
+    if (onChainPhase === ON_CHAIN_PHASE.COMMIT || onChainPhase === ON_CHAIN_PHASE.REVEAL) {
+      await this.waitForRevealDeadline();
+      await this.chainService.resolveRound();
+      onChainPhase = ON_CHAIN_PHASE.RULES;
+    }
+
+    if (onChainPhase === ON_CHAIN_PHASE.RULES) {
+      const alivePlayers = await this.chainService.getAlivePlayers();
+      const winners = alivePlayers.length > 0 ? [alivePlayers[0]] : [];
+      const shares = winners.length > 0 ? [10000] : [];
+      await this.chainService.endGame(winners, shares);
+      onChainPhase = ON_CHAIN_PHASE.ENDED;
+    }
+
+    if (onChainPhase === ON_CHAIN_PHASE.ENDED) {
+      await this.chainService.newGame();
+    }
+  }
+
 
   async getState(): Promise<GameState> {
     const alivePlayers = await this.chainService.getAlivePlayers();

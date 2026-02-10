@@ -41,6 +41,22 @@ export class GameController {
     );
   }
 
+  @Post('reset')
+  @ApiOperation({ summary: '[Admin] Reset game to clean LOBBY', description: 'Cycles the on-chain contract back to LOBBY and clears all registered agents. Use when you need a fresh start.' })
+  @ApiResponse({ status: 201, description: 'Game reset to clean LOBBY' })
+  @ApiResponse({ status: 400, description: 'Reset failed' })
+  async resetGame() {
+    try {
+      await this.gameService.resetGame();
+      return { success: true, message: 'Game reset to clean LOBBY. Ready for new players.' };
+    } catch (error) {
+      throw new HttpException(
+        error instanceof Error ? error.message : 'Failed to reset game',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('start')
   @ApiOperation({ summary: '[Admin] Manual game start', description: 'Manual override to start the game. Normally the game auto-starts 30s after minimum players register on-chain. Use only for testing.' })
   @ApiResponse({ status: 201, description: 'Game started successfully' })
