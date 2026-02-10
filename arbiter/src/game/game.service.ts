@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChainService } from '../chain/chain.service';
 import { RulesService } from '../rules/rules.service';
@@ -38,7 +38,7 @@ const ON_CHAIN_PHASE = {
 } as const;
 
 @Injectable()
-export class GameService implements OnModuleInit {
+export class GameService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(GameService.name);
   private readonly MOLTBOOK_API_BASE: string;
 
@@ -61,6 +61,60 @@ export class GameService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.recoverFromStaleState();
+    this.startEventWatching();
+  }
+
+  onModuleDestroy(): void {
+    if (this.autoStartTimer) {
+      clearTimeout(this.autoStartTimer);
+    }
+    this.chainService.stopWatchingPlayerRegistered();
+  }
+
+  private startEventWatching(): void {
+    this.chainService.watchPlayerRegistered((address) => {
+      this.handlePlayerRegisteredEvent(address).catch((error) => {
+        this.logger.error(`Error handling PlayerRegistered for ${address}:`, error);
+      });
+    });
+  }
+
+  private async handlePlayerRegisteredEvent(address: string): Promise<void> {
+    if (this.phase !== Phase.LOBBY) {
+      this.logger.warn(`PlayerRegistered for ${address} ignored: not in LOBBY`);
+      return;
+    }
+
+    const existing = Array.from(this.registeredAgents.values()).find(
+      (agent) => agent.walletAddress.toLowerCase() === address.toLowerCase(),
+    );
+
+    if (!existing) {
+      const agentId = `player-${address.slice(2, 10).toLowerCase()}`;
+      this.registeredAgents.set(agentId, {
+        walletAddress: address,
+        moltbookUsername: null,
+        callbackUrl: null,
+        hookToken: null,
+      });
+      this.logger.log(`On-chain registration detected: ${address.slice(0, 10)} (no webhook)`);
+    } else {
+      this.logger.log(`On-chain registration detected: ${address.slice(0, 10)} (already registered via API)`);
+    }
+
+    this.gateway.emitPlayerJoined(
+      existing?.moltbookUsername ?? address.slice(0, 10),
+      address,
+      existing?.moltbookUsername ?? address.slice(0, 10),
+    );
+
+    const playerCount = await this.chainService.getPlayerCount();
+    await this.notifyAgents('player:joined', {
+      walletAddress: address,
+      playerCount,
+    });
+
+    await this.checkAutoStart();
   }
 
   private async recoverFromStaleState(): Promise<void> {

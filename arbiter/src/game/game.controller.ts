@@ -28,7 +28,7 @@ export class GameController {
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Register an agent', description: 'Registers agent for the game. Optionally verifies Moltbook profile if username provided.' })
+  @ApiOperation({ summary: 'Register agent for the game', description: 'Register your agent with webhook URL and hook token. Required before on-chain registration so the server can send you game event notifications.' })
   @ApiResponse({ status: 201, description: 'Agent registered successfully' })
   @ApiResponse({ status: 400, description: 'Invalid Moltbook account or registration failed' })
   async register(@Body() dto: RegisterDto) {
@@ -42,7 +42,7 @@ export class GameController {
   }
 
   @Post('start')
-  @ApiOperation({ summary: 'Start the game', description: 'Begins the game loop. Requires minimum player count to be met.' })
+  @ApiOperation({ summary: '[Admin] Manual game start', description: 'Manual override to start the game. Normally the game auto-starts 30s after minimum players register on-chain. Use only for testing.' })
   @ApiResponse({ status: 201, description: 'Game started successfully' })
   @ApiResponse({ status: 400, description: 'Not enough players or game already running' })
   async startGame() {

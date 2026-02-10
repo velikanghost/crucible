@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   createPublicClient,
@@ -24,11 +24,12 @@ const monadTestnet = defineChain({
 });
 
 @Injectable()
-export class ChainService implements OnModuleInit {
+export class ChainService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChainService.name);
   private publicClient: ReturnType<typeof createPublicClient>;
   private walletClient: ReturnType<typeof createWalletClient>;
   private contractAddress: Address;
+  private playerRegisteredUnwatch: (() => void) | null = null;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -260,6 +261,43 @@ export class ChainService implements OnModuleInit {
       functionName: 'phase',
     });
     return Number(result);
+  }
+
+  watchPlayerRegistered(callback: (address: Address) => void): void {
+    if (this.playerRegisteredUnwatch) {
+      this.logger.warn('PlayerRegistered watcher already running');
+      return;
+    }
+
+    this.playerRegisteredUnwatch = this.publicClient.watchContractEvent({
+      address: this.contractAddress,
+      abi: CRUCIBLE_ABI,
+      eventName: 'PlayerRegistered',
+      onLogs: (logs) => {
+        for (const log of logs) {
+          const playerAddress = (log as unknown as { args: { player: Address } }).args.player;
+          this.logger.log(`PlayerRegistered event: ${playerAddress}`);
+          callback(playerAddress);
+        }
+      },
+      onError: (error) => {
+        this.logger.error('Error watching PlayerRegistered:', error);
+      },
+    });
+
+    this.logger.log('Started watching PlayerRegistered events');
+  }
+
+  stopWatchingPlayerRegistered(): void {
+    if (this.playerRegisteredUnwatch) {
+      this.playerRegisteredUnwatch();
+      this.playerRegisteredUnwatch = null;
+      this.logger.log('Stopped watching PlayerRegistered events');
+    }
+  }
+
+  onModuleDestroy(): void {
+    this.stopWatchingPlayerRegistered();
   }
 
   async getRevealDeadline(): Promise<number> {
